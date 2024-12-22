@@ -1,0 +1,23 @@
+server {
+    listen ${NGINX_PORT};
+    server_name ${NGINX_SERVER_NAME};
+
+    root ${NGINX_DOCUMENT_ROOT};
+    index index.php index.html;
+
+    location / {
+        try_files @@uri @@uri/ /index.php?@@query_string;
+    }
+
+    location ~ \.php@@ {
+        include fastcgi_params;
+        fastcgi_pass ${NGINX_FASTCGI_PASS};
+        fastcgi_index index.php;
+        fastcgi_param SCRIPT_FILENAME @@document_root@@fastcgi_script_name;
+    }
+
+    include /etc/nginx/after.d/*.conf;
+
+    error_log /var/log/nginx/error.log;
+    access_log /var/log/nginx/access.log;
+}
