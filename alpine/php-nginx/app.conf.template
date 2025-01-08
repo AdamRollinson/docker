@@ -5,6 +5,8 @@ server {
     root ${NGINX_DOCUMENT_ROOT};
     index index.php index.html;
 
+    client_max_body_size ${PHP_POST_MAX_SIZE};
+
     location / {
         try_files @@uri @@uri/ /index.php?@@query_string;
     }
