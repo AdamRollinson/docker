@@ -37,11 +37,21 @@ RUN apk add --no-cache \
     touch /var/log/cron.log && \
     chmod 0644 /var/log/cron.log
 
+# Create non-root application user
+RUN addgroup -g 1000 -S appuser && \
+    adduser -u 1000 -S appuser -G appuser
+
 # Set working directory
 WORKDIR /app
 
+# Set ownership of working directory
+RUN chown appuser:appuser /app
+
 # Copy only necessary configuration files
 COPY --chown=root:root supervisord.conf /etc/supervisord.conf
+
+# Default to non-root user
+USER appuser
 
 # Default entrypoint for debugging (can be overridden)
 ENTRYPOINT ["bash"]

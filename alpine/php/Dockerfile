@@ -1,6 +1,9 @@
 # Use the updated base image
 FROM adamrollogi/base:latest
 
+# Switch to root for package installation
+USER root
+
 # Define a build-time argument for PHP version
 ARG PHP_VERSION
 
@@ -86,6 +89,14 @@ RUN chmod +x /usr/local/bin/php-entrypoint.sh
 
 # Copy the custom PHP ini template
 COPY php.ini.template /usr/local/etc/php/
+
+# Set ownership of PHP config and log dirs for non-root runtime
+RUN chown -R appuser:appuser \
+    /etc/php${PHP_VERSION} \
+    /var/log
+
+# Default to non-root user
+USER appuser
 
 # Set the entrypoint
 ENTRYPOINT ["php-entrypoint.sh"]
