@@ -55,6 +55,19 @@ PHP versions use two formats throughout the codebase:
 
 The build script converts between them: `PHP_VERSION_ENV=$(echo "$version" | tr -d '.')`
 
+### SSL / HTTPS (php-nginx only)
+Optional HTTPS support via environment variables. Disabled by default (`NGINX_SSL_ENABLED=false`).
+
+When enabled, the entrypoint selects which Nginx config templates to process:
+- **SSL off** → `app.conf.template` (HTTP only)
+- **SSL on** → `app-ssl.conf.template` (HTTPS) + optionally `app-ssl-redirect.conf.template` (HTTP→HTTPS redirect)
+
+Key implementation details:
+- `ssl_session_cache` and `ssl_session_timeout` are `http`-level directives in `nginx.conf` — the entrypoint patches them via `sed` rather than setting them per-server (shared memory zone names conflict otherwise)
+- HSTS header is stripped from the rendered config via `sed` when `NGINX_SSL_HSTS=false`
+- Self-signed certs are generated idempotently (skipped if files already exist)
+- `healthcheck.sh` wrapper detects SSL mode and checks the appropriate endpoint
+
 ### Process Management
 Supervisor manages all long-running processes inside containers:
 - **base**: runs cron
@@ -68,6 +81,8 @@ GitHub Actions workflow (`.github/workflows/docker-build.yml`):
 - **Build strategy**: base image first, then PHP versions in parallel (matrix strategy)
 - Uses **Docker Build Cloud** (`adamrollogi/medusa` endpoint) for multi-arch builds
 - Publishes to Docker Hub with SBOM and provenance attestation
+- VEX attestations via `docker/scout-action` (attestation-add command)
+- Trivy vulnerability scanning (fails on CRITICAL/HIGH)
 - **Required secrets/vars**: `DOCKER_USER` (variable), `DOCKER_PAT` (secret)
 
 ## Key Files
@@ -80,7 +95,11 @@ GitHub Actions workflow (`.github/workflows/docker-build.yml`):
 | `alpine/php/php.ini.template` | Runtime PHP configuration template |
 | `alpine/php/php-entrypoint.sh` | PHP container entrypoint (envsubst) |
 | `alpine/php-nginx/Dockerfile` | Nginx + PHP-FPM image |
-| `alpine/php-nginx/app.conf.template` | Nginx server configuration template |
+| `alpine/php-nginx/app.conf.template` | Nginx HTTP-only server config template |
+| `alpine/php-nginx/app-ssl.conf.template` | Nginx HTTPS server config template |
+| `alpine/php-nginx/app-ssl-redirect.conf.template` | HTTP→HTTPS redirect template |
 | `alpine/php-nginx/www.conf.template` | PHP-FPM pool configuration template |
-| `alpine/php-nginx/php-nginx-entrypoint.sh` | Nginx container entrypoint |
+| `alpine/php-nginx/php-nginx-entrypoint.sh` | Nginx container entrypoint (SSL logic, envsubst) |
+| `alpine/php-nginx/healthcheck.sh` | Docker HEALTHCHECK wrapper (HTTP/HTTPS aware) |
 | `ENV.md` | Complete environment variable reference |
+| `SECURITY.md` | CVE details and VEX attestation documentation |
