@@ -32,14 +32,25 @@ ENV OPCACHE_MAX_WASTED_PERCENTAGE=5
 ENV OPCACHE_LOG_VERBOSITY_LEVEL=1
 ENV OPCACHE_ERROR_LOG=/var/log/php-opcache.log
 
-# Update, add testing repo, and install PHP
+# PHP Security Settings (configurable, permissive defaults for base image)
+ENV PHP_EXPOSE_PHP=On \
+    PHP_DISABLE_FUNCTIONS="" \
+    PHP_ALLOW_URL_FOPEN=On \
+    PHP_ALLOW_URL_INCLUDE=Off \
+    PHP_OPEN_BASEDIR="" \
+    PHP_SESSION_COOKIE_HTTPONLY=On \
+    PHP_SESSION_COOKIE_SAMESITE=Lax \
+    PHP_SESSION_USE_STRICT_MODE=On \
+    PHP_CGI_FIX_PATHINFO=0 \
+    PHP_MAX_INPUT_VARS=1000
+
+# Install PHP with scoped edge repos (prevents edge repos leaking to downstream images)
 RUN set -eux; \
     apk update && apk upgrade; \
-    echo "http://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/repositories; \
-    echo "http://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories; \
-    echo "http://dl-cdn.alpinelinux.org/alpine/edge/testing" >> /etc/apk/repositories; \
-    apk update; \
     apk add --no-cache \
+        --repository=http://dl-cdn.alpinelinux.org/alpine/edge/main \
+        --repository=http://dl-cdn.alpinelinux.org/alpine/edge/community \
+        --repository=http://dl-cdn.alpinelinux.org/alpine/edge/testing \
         php${PHP_VERSION} \
         php${PHP_VERSION}-cli \
         php${PHP_VERSION}-json \
@@ -69,17 +80,26 @@ RUN set -eux; \
         php${PHP_VERSION}-bcmath \
         php${PHP_VERSION}-ctype \
         php${PHP_VERSION}-iconv \
-        php${PHP_VERSION}-session;
+        php${PHP_VERSION}-session
 
+# Symlink php binary
+RUN rm -f /usr/bin/php && ln -s /usr/bin/php${PHP_VERSION} /usr/bin/php
 
-# If /usr/bin/php exists, unlink it
-RUN if [ -L /usr/bin/php ]; then unlink /usr/bin/php; fi
+# Install Composer with signature verification
+RUN curl -sS https://getcomposer.org/installer -o composer-setup.php && \
+    EXPECTED_SIGNATURE="$(curl -sS https://composer.github.io/installer.sig)" && \
+    ACTUAL_SIGNATURE="$(php -r "echo hash_file('sha384', 'composer-setup.php');")" && \
+    if [ "$EXPECTED_SIGNATURE" != "$ACTUAL_SIGNATURE" ]; then \
+        echo "ERROR: Invalid Composer installer signature"; rm composer-setup.php; exit 1; \
+    fi && \
+    php composer-setup.php --install-dir=/usr/local/bin --filename=composer && \
+    rm composer-setup.php
 
-# symlink php${PHP_VERSION} to php
-RUN ln -s /usr/bin/php${PHP_VERSION} /usr/bin/php
-
-RUN curl -sS https://getcomposer.org/installer -o composer-setup.php
-RUN /usr/bin/php composer-setup.php --install-dir=/usr/local/bin --filename=composer
+# OCI metadata labels
+LABEL org.opencontainers.image.title="adamrollogi/php" \
+      org.opencontainers.image.description="PHP CLI with Composer and extensions on Alpine 3.21" \
+      org.opencontainers.image.source="https://github.com/adamrollogi/docker" \
+      org.opencontainers.image.licenses="MIT"
 
 # Copy entrypoint script
 COPY php-entrypoint.sh /usr/local/bin/
@@ -99,7 +119,7 @@ RUN chown -R appuser:appuser \
 USER appuser
 
 # Set the entrypoint
-ENTRYPOINT ["php-entrypoint.sh"]
+ENTRYPOINT ["/sbin/tini", "--", "php-entrypoint.sh"]
 
 # Start Supervisord
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]

@@ -13,6 +13,18 @@
 - **`PHP_ERROR_REPORTING`**: Sets the error reporting level. Default is `"E_ALL & ~E_DEPRECATED & ~E_STRICT"`.
 - **`PHP_DATE_TIMEZONE`**: Sets the default timezone used by all date/time functions. Default is `UTC`.
 
+### PHP Security Settings
+- **`PHP_EXPOSE_PHP`**: Controls whether PHP version is exposed via `X-Powered-By` header. Default is `On`. **Production recommended: `Off`**
+- **`PHP_DISABLE_FUNCTIONS`**: Comma-separated list of functions to disable. Default is `""` (none disabled). **Production recommended: `exec,passthru,shell_exec,system,proc_open,popen`**
+- **`PHP_ALLOW_URL_FOPEN`**: Whether to allow URL-aware fopen wrappers. Default is `On`. **Production recommended: `Off`** (unless needed)
+- **`PHP_ALLOW_URL_INCLUDE`**: Whether to allow `include`/`require` for URL-aware fopen wrappers. Default is `Off`.
+- **`PHP_OPEN_BASEDIR`**: Limits the files PHP can access to the specified directory tree. Default is `""` (unrestricted). **Production recommended: `/var/www/html:/tmp`**
+- **`PHP_SESSION_COOKIE_HTTPONLY`**: Marks session cookies as HTTP-only (inaccessible to JavaScript). Default is `On`.
+- **`PHP_SESSION_COOKIE_SAMESITE`**: Sets the SameSite attribute for session cookies. Default is `Lax`.
+- **`PHP_SESSION_USE_STRICT_MODE`**: Enables strict session ID mode, rejecting uninitialized session IDs. Default is `On`.
+- **`PHP_CGI_FIX_PATHINFO`**: Controls `cgi.fix_pathinfo` for proper path handling in PHP-FPM. Default is `0` (disabled).
+- **`PHP_MAX_INPUT_VARS`**: Maximum number of input variables accepted per request. Default is `1000`.
+
 ### OPcache Settings
 - **`OPCACHE_ENABLE`**: Enables or disables the OPcache. Default is `0`.
 - **`OPCACHE_ENABLE_CLI`**: Enables or disables the OPcache for the CLI version of PHP. Default is `0`.
@@ -42,3 +54,24 @@
 - **`NGINX_SERVER_NAME`**: Sets the server name for Nginx. Default is `_`.
 - **`NGINX_FASTCGI_PASS`**: Defines the address to which FastCGI requests will be sent. Default is `127.0.0.1:9000`.
 - **`NGINX_DOCUMENT_ROOT`**: Sets the document root for Nginx. Default is `/var/www/html`.
+
+### SSL / HTTPS Settings
+
+All SSL settings are opt-in. When `NGINX_SSL_ENABLED` is `false` (the default), these variables are ignored and the image behaves identically to previous versions.
+
+- **`NGINX_SSL_ENABLED`**: Master switch for HTTPS support. Default is `false`.
+- **`NGINX_SSL_PORT`**: Port for the HTTPS listener. Default is `443`. Use `8443` when running as non-root.
+- **`NGINX_SSL_CERTIFICATE`**: Path to the SSL certificate file. Default is `/etc/nginx/ssl/cert.pem`.
+- **`NGINX_SSL_CERTIFICATE_KEY`**: Path to the SSL private key file. Default is `/etc/nginx/ssl/key.pem`.
+- **`NGINX_SSL_PROTOCOLS`**: Allowed TLS protocol versions. Default is `TLSv1.2 TLSv1.3` (Mozilla Intermediate).
+- **`NGINX_SSL_CIPHERS`**: Allowed cipher suites. Default is Mozilla Intermediate cipher string.
+- **`NGINX_SSL_PREFER_SERVER_CIPHERS`**: Whether to prefer server ciphers over client ciphers. Default is `off` (modern recommendation).
+- **`NGINX_SSL_SESSION_TIMEOUT`**: SSL session timeout duration. Default is `1d`.
+- **`NGINX_SSL_SESSION_CACHE`**: SSL session cache configuration. Default is `shared:SSL:10m`.
+- **`NGINX_SSL_REDIRECT`**: Whether to redirect HTTP requests to HTTPS when SSL is enabled. Default is `true`.
+- **`NGINX_SSL_REDIRECT_PORT`**: Port for the HTTP-to-HTTPS redirect listener. Defaults to the value of `NGINX_PORT`.
+- **`NGINX_SSL_SELF_SIGNED`**: Auto-generate a self-signed certificate at startup (for development). Default is `false`.
+- **`NGINX_SSL_SELF_SIGNED_CN`**: Common Name and SAN for the self-signed certificate. Default is `localhost`.
+- **`NGINX_SSL_SELF_SIGNED_DAYS`**: Validity period in days for the self-signed certificate. Default is `365`.
+- **`NGINX_SSL_HSTS`**: Enable `Strict-Transport-Security` header on HTTPS responses. Default is `true`.
+- **`NGINX_SSL_HSTS_MAX_AGE`**: HSTS max-age value in seconds. Default is `63072000` (2 years).

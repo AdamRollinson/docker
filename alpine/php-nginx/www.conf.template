@@ -34,12 +34,14 @@ php_admin_value[upload_max_filesize] = ${PHP_UPLOAD_MAX_FILESIZE}
 
 ; Set open file descriptor limit
 rlimit_files = 1024
+rlimit_core = 0
 
 ; Redirect worker stdout and stderr into the main error log
 catch_workers_output = yes
+decorate_workers_output = no
 
 ; Security settings
-clear_env = yes
+clear_env = no
 security.limit_extensions = .php
 
 ; Adjust slowlog settings for debugging long requests

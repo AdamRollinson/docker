@@ -6,6 +6,36 @@ display_errors = ${PHP_DISPLAY_ERRORS}
 error_reporting = ${PHP_ERROR_REPORTING}
 date.timezone = ${PHP_DATE_TIMEZONE}
 
+; Security
+expose_php = ${PHP_EXPOSE_PHP}
+disable_functions = ${PHP_DISABLE_FUNCTIONS}
+allow_url_fopen = ${PHP_ALLOW_URL_FOPEN}
+allow_url_include = ${PHP_ALLOW_URL_INCLUDE}
+cgi.fix_pathinfo = ${PHP_CGI_FIX_PATHINFO}
+
+; Open basedir (empty = unrestricted)
+; Set to restrict filesystem access, e.g. /var/www/html:/tmp
+open_basedir = ${PHP_OPEN_BASEDIR}
+
+; Error logging
+log_errors = On
+log_errors_max_len = 1024
+
+; Session security
+session.cookie_httponly = ${PHP_SESSION_COOKIE_HTTPONLY}
+session.cookie_samesite = ${PHP_SESSION_COOKIE_SAMESITE}
+session.use_strict_mode = ${PHP_SESSION_USE_STRICT_MODE}
+session.use_only_cookies = On
+
+; Input limits
+max_input_vars = ${PHP_MAX_INPUT_VARS}
+max_input_nesting_level = 64
+
+; Performance
+realpath_cache_size = 4096k
+realpath_cache_ttl = 600
+output_buffering = 4096
+
 [opcache]
 ; Enable or disable opcache
 opcache.enable=${OPCACHE_ENABLE}
