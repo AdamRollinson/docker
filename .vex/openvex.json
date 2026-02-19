@@ -1,0 +1,36 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/adamrollogi/docker/vex",
+  "author": "Rollogi",
+  "timestamp": "2026-02-19T00:00:00Z",
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2023-27482",
+        "description": "Authentication bypass in Home Assistant Supervisor API. This CVE affects homeassistant-supervisor, NOT the general-purpose supervisord process manager (Alpine package: supervisor) used in these images."
+      },
+      "products": [
+        { "@id": "pkg:docker/adamrollogi/base" },
+        { "@id": "pkg:docker/adamrollogi/php" },
+        { "@id": "pkg:docker/adamrollogi/php-nginx" }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "These images use the supervisord process manager (supervisord.org), not Home Assistant Supervisor. The Alpine 'supervisor' APK package is an entirely different project from 'homeassistant-supervisor'. Zero Home Assistant code exists in these images."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-60876",
+        "description": "BusyBox wget through 1.37.0 accepts raw CR/LF and C0 control bytes in HTTP request-target, allowing request line splitting and header injection via crafted URLs."
+      },
+      "products": [
+        { "@id": "pkg:docker/adamrollogi/base" },
+        { "@id": "pkg:docker/adamrollogi/php" },
+        { "@id": "pkg:docker/adamrollogi/php-nginx" }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The BusyBox wget applet is never invoked in these images. The base image installs the standalone wget package (APK: wget), which shadows the BusyBox applet in PATH. No entrypoint script, build step, or runtime process in any image layer uses wget — all HTTP operations use curl. The BusyBox binary cannot be removed as it is Alpine's coreutils provider, but the vulnerable wget applet within it is unreachable."
+    }
+  ]
+}

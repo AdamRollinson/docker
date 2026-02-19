@@ -53,6 +53,14 @@ jobs:
           provenance: true
           sbom: true
 
+      # Attach VEX attestation to suppress known false positives
+      - name: 📋 Attach VEX attestation to Base Image
+        run: |
+          docker scout attestation add \
+            --file .vex/openvex.json \
+            --predicate-type https://openvex.dev/ns/v0.2.0 \
+            ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}
+
   # Build PHP and PHP-NGINX Images after Base Image
   build-php:
     needs: build-base
@@ -99,6 +107,14 @@ jobs:
           provenance: true
           sbom: true
 
+      # Attach VEX attestation to suppress known false positives
+      - name: 📋 Attach VEX attestation to PHP Image (${{ matrix.php_version }})
+        run: |
+          docker scout attestation add \
+            --file .vex/openvex.json \
+            --predicate-type https://openvex.dev/ns/v0.2.0 \
+            ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ matrix.php_version }}
+
       # Prepare Clean PHP Version
       - name: 🛠️ Prepare Clean PHP Version for PHP-NGINX Build
         run: echo "PHP_VERSION=$(echo ${{ matrix.php_version }} | tr -d '.')" >> $GITHUB_ENV
@@ -117,6 +133,14 @@ jobs:
           outputs: 'type=registry'
           provenance: true
           sbom: true
+
+      # Attach VEX attestation to suppress known false positives
+      - name: 📋 Attach VEX attestation to PHP-NGINX Image (${{ matrix.php_version }})
+        run: |
+          docker scout attestation add \
+            --file .vex/openvex.json \
+            --predicate-type https://openvex.dev/ns/v0.2.0 \
+            ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ matrix.php_version }}
 
       # Verify Build Results
       - name: ✅ Verify Built Images
