@@ -55,11 +55,12 @@ jobs:
 
       # Attach VEX attestation to suppress known false positives
       - name: Attach VEX attestation to Base Image
-        run: |
-          docker scout attestation add \
-            --file .vex/openvex.json \
-            --predicate-type https://openvex.dev/ns/v0.2.0 \
-            ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}
+        uses: docker/scout-action@f8c776824083494ab0d56b8105ba2ca85c86e4de # v1.18.2
+        with:
+          command: attestation-add
+          image: ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}
+          file: .vex/openvex.json
+          predicate-type: https://openvex.dev/ns/v0.2.0
 
       # Trivy vulnerability scan
       - name: Run Trivy vulnerability scanner on Base Image
@@ -119,11 +120,12 @@ jobs:
 
       # Attach VEX attestation to suppress known false positives
       - name: Attach VEX attestation to PHP Image (${{ matrix.php_version }})
-        run: |
-          docker scout attestation add \
-            --file .vex/openvex.json \
-            --predicate-type https://openvex.dev/ns/v0.2.0 \
-            ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ matrix.php_version }}
+        uses: docker/scout-action@f8c776824083494ab0d56b8105ba2ca85c86e4de # v1.18.2
+        with:
+          command: attestation-add
+          image: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ matrix.php_version }}
+          file: .vex/openvex.json
+          predicate-type: https://openvex.dev/ns/v0.2.0
 
       # Trivy vulnerability scan for PHP Image
       - name: Run Trivy vulnerability scanner on PHP Image (${{ matrix.php_version }})
@@ -156,11 +158,12 @@ jobs:
 
       # Attach VEX attestation to suppress known false positives
       - name: Attach VEX attestation to PHP-NGINX Image (${{ matrix.php_version }})
-        run: |
-          docker scout attestation add \
-            --file .vex/openvex.json \
-            --predicate-type https://openvex.dev/ns/v0.2.0 \
-            ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ matrix.php_version }}
+        uses: docker/scout-action@f8c776824083494ab0d56b8105ba2ca85c86e4de # v1.18.2
+        with:
+          command: attestation-add
+          image: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ matrix.php_version }}
+          file: .vex/openvex.json
+          predicate-type: https://openvex.dev/ns/v0.2.0
 
       # Trivy vulnerability scan for PHP-NGINX Image
       - name: Run Trivy vulnerability scanner on PHP-NGINX Image (${{ matrix.php_version }})
