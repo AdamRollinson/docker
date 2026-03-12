@@ -64,7 +64,7 @@ jobs:
 
       # Trivy vulnerability scan
       - name: Run Trivy vulnerability scanner on Base Image
-        uses: aquasecurity/trivy-action@c1824fd6edce30d7ab345a9989de00bbd46ef284 # v0.34.0
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
         with:
           image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}
           format: 'table'
@@ -129,7 +129,7 @@ jobs:
 
       # Trivy vulnerability scan for PHP Image
       - name: Run Trivy vulnerability scanner on PHP Image (${{ matrix.php_version }})
-        uses: aquasecurity/trivy-action@c1824fd6edce30d7ab345a9989de00bbd46ef284 # v0.34.0
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
         with:
           image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ matrix.php_version }}
           format: 'table'
@@ -167,7 +167,7 @@ jobs:
 
       # Trivy vulnerability scan for PHP-NGINX Image
       - name: Run Trivy vulnerability scanner on PHP-NGINX Image (${{ matrix.php_version }})
-        uses: aquasecurity/trivy-action@c1824fd6edce30d7ab345a9989de00bbd46ef284 # v0.34.0
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
         with:
           image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ matrix.php_version }}
           format: 'table'
