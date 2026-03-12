@@ -43,7 +43,7 @@ jobs:
 
       # Build and Push Base Image
       - name: Build Base Image with Build Cloud
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
         with:
           platforms: ${{ env.PLATFORMS }}
           context: ./alpine/base
@@ -106,7 +106,7 @@ jobs:
 
       # Build and Push PHP Image
       - name: Build PHP Image (${{ matrix.php_version }}) with Build Cloud
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
         with:
           platforms: ${{ env.PLATFORMS }}
           context: ./alpine/php
@@ -143,7 +143,7 @@ jobs:
 
       # Build and Push PHP-NGINX Image
       - name: Build PHP-NGINX Image (${{ matrix.php_version }}) with Build Cloud
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
         with:
           platforms: ${{ env.PLATFORMS }}
           context: ./alpine/php-nginx
