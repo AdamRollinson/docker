@@ -406,7 +406,7 @@ alpine/check-php-versions.sh
 alpine/check-php-versions.sh --update
 ```
 
-You can also trigger the bump workflow from the Actions tab via "Run workflow".
+You can also trigger the bump workflow from the Actions tab via "Run workflow". Every bump is recorded on the [changelog](https://docker.rollogi.co.uk/releases/changelog) and, once built, gets a GitHub release with the image digests.
 
 ### Test the images
 

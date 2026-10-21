@@ -1,9 +1,9 @@
 name: Bump Pinned PHP Versions
 
 # Checks Alpine edge every four hours for newer PHP releases. When one has landed for every
-# architecture we build, the pin in alpine/php-versions.txt is updated, committed
-# to main and the Docker build workflow is dispatched so the new images are
-# built and pushed without manual intervention.
+# architecture we build, the pin in alpine/php-versions.txt is updated, the change is recorded
+# on the documentation changelog, both are committed to main and the Docker build workflow is
+# dispatched so the new images are built and pushed without manual intervention.
 
 on:
   schedule:
@@ -27,6 +27,9 @@ jobs:
 
       - name: Compare pinned releases with Alpine edge
         run: alpine/check-php-versions.sh --update
+
+      - name: Record the change on the docs changelog
+        run: alpine/changelog.sh
 
       # Pushes made with GITHUB_TOKEN do not trigger other workflows, so the build
       # workflow is dispatched explicitly after the commit lands.

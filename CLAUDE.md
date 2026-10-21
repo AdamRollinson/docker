@@ -106,7 +106,8 @@ There is no supervisord (and therefore no Python) in the images since October 20
 ### Automatic PHP release bumps (`.github/workflows/php-version-bump.yml`)
 - **Triggers**: cron every four hours (`17 */4 * * *`), manual `workflow_dispatch`
 - Runs `alpine/check-php-versions.sh --update`. A minor is only bumped when the same release exists in edge for both `x86_64` and `aarch64`
-- Commits the change to `main` as `github-actions[bot]`, then dispatches `docker-build.yml` with `gh workflow run` (pushes made with `GITHUB_TOKEN` do not trigger other workflows on their own)
+- Runs `alpine/changelog.sh`, which reads the unstaged diff of the versions file and inserts one line per changed pin under today's date (newest first, same-day entries merged) after the `<!-- entries -->` marker in `docs/content/5.releases/4.changelog.md`; BSD awk compatible (entries passed via `ENVIRON`)
+- Commits the change (pins and changelog) to `main` as `github-actions[bot]`, then dispatches `docker-build.yml` with `gh workflow run` (pushes made with `GITHUB_TOKEN` do not trigger other workflows on their own)
 - Needs `contents: write` and `actions: write`, which the workflow requests itself
 
 ### Image build (`.github/workflows/docker-build.yml`)
