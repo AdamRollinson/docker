@@ -1,0 +1,9 @@
+# Development only: never let the browser cache assets matching NGINX_NO_CACHE_PATTERN,
+# and bypass sendfile so edits on bind mounts show up immediately.
+location ~* ${NGINX_NO_CACHE_PATTERN} {
+    sendfile off;
+    expires off;
+    add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+    add_header Pragma "no-cache" always;
+    try_files @@uri =404;
+}

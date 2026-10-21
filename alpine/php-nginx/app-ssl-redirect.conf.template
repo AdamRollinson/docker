@@ -1,5 +1,6 @@
 server {
     listen ${NGINX_SSL_REDIRECT_PORT};
+    listen [::]:${NGINX_SSL_REDIRECT_PORT};
     server_name ${NGINX_SERVER_NAME};
 
     # Hide Nginx version
@@ -8,12 +9,19 @@ server {
     # Health check endpoint (for load balancers / Docker HEALTHCHECK)
     location = /health {
         access_log off;
+        default_type text/plain;
         return 200 "OK\n";
-        add_header Content-Type text/plain;
     }
 
-    # Redirect all other requests to HTTPS
+    # Serve ACME HTTP-01 challenges over plain HTTP so certificates can be issued
+    location ^~ /.well-known/acme-challenge/ {
+        root ${NGINX_DOCUMENT_ROOT};
+        try_files @@uri =404;
+    }
+
+    # Redirect all other requests to HTTPS. The target host is fixed by the entrypoint
+    # (NGINX_SSL_REDIRECT_HOST or the first server_name) so the Host header is not reflected.
     location / {
-        return 301 https://@@host:${NGINX_SSL_PORT}@@request_uri;
+        return 301 https://${NGINX_SSL_REDIRECT_HOST}${NGINX_SSL_REDIRECT_PORT_SUFFIX}@@request_uri;
     }
 }

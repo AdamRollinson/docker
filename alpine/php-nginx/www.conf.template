@@ -19,18 +19,11 @@ pm.max_spare_servers = ${PHP_FPM_MAX_SPARE_SERVERS}
 ; Limit the number of requests a child process serves
 pm.max_requests = ${PHP_FPM_MAX_REQUESTS}
 
-; Memory limit for PHP scripts
-php_admin_value[memory_limit] = ${PHP_MEMORY_LIMIT}
-
-; Enable error logging
-php_admin_value[error_log] = /var/log/php${PHP_VERSION}-fpm/www-error.log
+; Error logging is pinned per pool; every other PHP setting comes from php.ini so that
+; PHP_* variables and php.<setting> overrides apply equally to CLI and FPM.
+; Pin a setting for FPM only with: -e "fpm.pool.php_admin_value[memory_limit]=512M"
+php_admin_value[error_log] = ${PHP_FPM_ERROR_LOG}
 php_admin_flag[log_errors] = on
-
-; Adjust execution limits for better performance
-php_admin_value[max_execution_time] = ${PHP_MAX_EXECUTION_TIME}
-php_admin_value[max_input_time] = ${PHP_MAX_INPUT_TIME}
-php_admin_value[post_max_size] = ${PHP_POST_MAX_SIZE}
-php_admin_value[upload_max_filesize] = ${PHP_UPLOAD_MAX_FILESIZE}
 
 ; Set open file descriptor limit
 rlimit_files = 1024
@@ -45,5 +38,5 @@ clear_env = no
 security.limit_extensions = .php
 
 ; Adjust slowlog settings for debugging long requests
-slowlog = /var/log/php${PHP_VERSION}-fpm/www-slow.log
+slowlog = ${PHP_FPM_SLOWLOG}
 request_slowlog_timeout = 5s

@@ -36,7 +36,7 @@ Docker Scout flags CVE-2023-27482 against our images because the Alpine `supervi
 
 CVE-2025-60876 is an HTTP header injection vulnerability in BusyBox's `wget` applet (through 1.37.0). CR/LF and C0 control bytes in the HTTP request-target allow request line splitting. CVSS 6.5 MEDIUM.
 
-Alpine 3.21 ships BusyBox 1.37.0, which contains the vulnerable applet. As of February 2026, no upstream fix exists — Alpine has not patched this in any version (including edge), and only a mailing list patch is available upstream.
+Alpine 3.23 ships BusyBox 1.37.0, which contains the vulnerable applet. As of February 2026, no upstream fix exists — Alpine has not patched this in any version (including edge), and only a mailing list patch is available upstream.
 
 **Why it's suppressed (not_affected / vulnerable_code_not_in_execute_path):**
 
@@ -56,9 +56,9 @@ Alpine 3.21 ships BusyBox 1.37.0, which contains the vulnerable applet. As of Fe
 
 ### CVE-2025-14017, CVE-2025-13034, CVE-2025-15079, CVE-2025-14819, CVE-2025-14524, CVE-2025-10966, CVE-2025-15224 — libcurl Vulnerabilities
 
-**Status:** Fixed — curl upgraded from Alpine edge (8.18.0+)
+**Status:** Fixed — Alpine 3.23 ships curl 8.22.0
 
-Alpine 3.21 ships curl 8.14.1, which contains 7 vulnerabilities (6 MEDIUM, 1 LOW) fixed in curl 8.18.0. Since Alpine 3.21's main repository does not yet carry the patched version, the base Dockerfile upgrades curl from the Alpine edge repository.
+Alpine 3.21 shipped curl 8.14.1, which contained 7 vulnerabilities (6 MEDIUM, 1 LOW) fixed in curl 8.18.0, and the base image used to pull curl from Alpine edge to work around it. Since the move to Alpine 3.23 (October 2026) the stock `curl` package is 8.22.0, so the edge override has been removed.
 
 | CVE | Severity | Description |
 |-----|----------|-------------|
@@ -70,24 +70,22 @@ Alpine 3.21 ships curl 8.14.1, which contains 7 vulnerabilities (6 MEDIUM, 1 LOW
 | CVE-2025-10966 | MEDIUM | wolfSSH SFTP host verification missing |
 | CVE-2025-15224 | LOW | SCP/SFTP public key auth bypass via SSH agent |
 
-The `--repository` flag is scoped to a single `apk add` command and does not persist the edge repository, so other packages remain pinned to Alpine 3.21 stable.
-
 **Affected images:** `adamrollogi/base`, `adamrollogi/php`, `adamrollogi/php-nginx`
-
-**When to revisit:** When Alpine 3.21 backports curl >= 8.18.0 to its main repository, the edge override can be removed from the Dockerfile.
 
 **References:**
 
 - [curl security advisories](https://curl.se/docs/security.html)
 - [Alpine Security Tracker — curl](https://security.alpinelinux.org/package/curl)
 
-### CVE-2025-47273 — setuptools Path Traversal
+### CVE-2025-47273, CVE-2026-59890 — setuptools Path Traversal and MANIFEST.in Exclusion Bypass
 
-**Status:** Fixed — setuptools upgraded to >= 78.1.1 in base image
+**Status:** Fixed — setuptools upgraded to >= 83.0.0 in base image
 
-CVE-2025-47273 is a path traversal vulnerability in setuptools' `PackageIndex.download()` (all versions < 78.1.1). Alpine 3.21's `py3-setuptools` ships v69.0.0, which is vulnerable.
+CVE-2025-47273 is a path traversal in setuptools' `PackageIndex.download()` (fixed in 78.1.1). CVE-2026-59890 is a MANIFEST.in exclusion bypass when building a source distribution (fixed in 83.0.0). Alpine 3.23's `py3-setuptools` ships 80.9.0, which is affected by the latter.
 
-Setuptools is present as a transitive dependency of the `supervisor` APK package. While the vulnerable code path is never exercised at runtime, setuptools is upgraded at build time via pip to eliminate the scanner finding.
+Setuptools is present only as a dependency of the `supervisor` APK package. Neither vulnerable code path is exercised at runtime, but setuptools is upgraded at build time via pip to eliminate the scanner findings.
+
+Earlier images on Alpine 3.21 had to cap the upgrade below 81 because supervisor 4.2.5 imported `pkg_resources`, which setuptools 81 removed. Alpine 3.23 ships supervisor 4.3.0, which loads entry points through `importlib.metadata`, so the cap has been dropped.
 
 **Affected images:** `adamrollogi/base`, `adamrollogi/php`, `adamrollogi/php-nginx`
 
@@ -95,3 +93,19 @@ Setuptools is present as a transitive dependency of the `supervisor` APK package
 
 - [NVD: CVE-2025-47273](https://nvd.nist.gov/vuln/detail/CVE-2025-47273)
 - [GHSA-5rjg-fvgr-3xxf](https://github.com/advisories/GHSA-5rjg-fvgr-3xxf)
+- [NVD: CVE-2026-59890](https://nvd.nist.gov/vuln/detail/CVE-2026-59890)
+
+### CVE-2026-40200, CVE-2026-6042 — musl Vulnerabilities
+
+**Status:** Fixed — base image runs `apk upgrade` before installing packages
+
+The pinned `alpine:3.21` digest shipped `musl-utils` 1.2.5-r9, which Trivy flagged for CVE-2026-40200 (HIGH, arbitrary code execution via stack-based overflow) and CVE-2026-6042 (MEDIUM, GB18030 decoder denial of service).
+
+The php and php-nginx Dockerfiles already ran `apk upgrade`, so only the standalone base image was affected. The base Dockerfile now upgrades the installed Alpine packages before adding its own, so every published image receives Alpine security updates at build time regardless of how old the pinned digest is.
+
+**Affected images:** `adamrollogi/base`
+
+**References:**
+
+- [NVD: CVE-2026-40200](https://nvd.nist.gov/vuln/detail/CVE-2026-40200)
+- [Alpine Security Tracker — musl](https://security.alpinelinux.org/package/musl)

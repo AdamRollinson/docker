@@ -8,11 +8,15 @@ USER root
 # Define a build-time argument for PHP version
 ARG PHP_VERSION
 
-# Set the PHP version as an environment variable
+# Set the PHP version as an environment variable.
+# PHP_PATCH_VERSION is inherited from the php image so php-fpm is pinned to the same release.
 ENV PHP_VERSION=${PHP_VERSION}
 
 ENV NGINX_PORT=80 \
+    NGINX_LISTEN_IPV6=true \
     NGINX_SERVER_NAME=_ \
+    NGINX_ACCESS_LOG="" \
+    NGINX_ERROR_LOG="" \
     NGINX_FASTCGI_PASS=127.0.0.1:9000 \
     NGINX_DOCUMENT_ROOT=/var/www/html \
     NGINX_SSL_ENABLED=false \
@@ -25,6 +29,7 @@ ENV NGINX_PORT=80 \
     NGINX_SSL_SESSION_TIMEOUT=1d \
     NGINX_SSL_SESSION_CACHE="shared:SSL:10m" \
     NGINX_SSL_REDIRECT=true \
+    NGINX_SSL_REDIRECT_HOST="" \
     NGINX_SSL_SELF_SIGNED=false \
     NGINX_SSL_SELF_SIGNED_CN=localhost \
     NGINX_SSL_SELF_SIGNED_DAYS=365 \
@@ -36,7 +41,9 @@ ENV NGINX_PORT=80 \
     PHP_FPM_MIN_SPARE_SERVERS=3 \
     PHP_FPM_MAX_SPARE_SERVERS=10 \
     PHP_FPM_MAX_REQUESTS=1000 \
-    PHP_FPM_REQUEST_TERMINATE_TIMEOUT=0
+    PHP_FPM_REQUEST_TERMINATE_TIMEOUT=0 \
+    PHP_FPM_ERROR_LOG="" \
+    PHP_FPM_SLOWLOG=""
 
 # Update, add testing repo, and install PHP and Nginx in a single RUN command
 # Note: apk upgrade with edge repos replaces gettext-envsubst with a Go-based
@@ -44,28 +51,33 @@ ENV NGINX_PORT=80 \
 RUN set -eux; \
     apk update && apk upgrade; \
     apk add --no-cache \
-        --repository=http://dl-cdn.alpinelinux.org/alpine/edge/main \
-        --repository=http://dl-cdn.alpinelinux.org/alpine/edge/community \
-        --repository=http://dl-cdn.alpinelinux.org/alpine/edge/testing \
+        --repository=https://dl-cdn.alpinelinux.org/alpine/edge/main \
+        --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community \
+        --repository=https://dl-cdn.alpinelinux.org/alpine/edge/testing \
         nginx \
         openssl \
-        php${PHP_VERSION}-fpm \
+        php${PHP_VERSION}-fpm${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
         gettext-envsubst; \
+    if [ -n "${PHP_PATCH_VERSION}" ]; then \
+        installed="$(php-fpm${PHP_VERSION} -v | awk 'NR==1 {print $2}')"; \
+        if [ "${installed}" != "${PHP_PATCH_VERSION}" ]; then \
+            echo "ERROR: pinned PHP-FPM ${PHP_PATCH_VERSION} but ${installed} was installed"; exit 1; \
+        fi; \
+    fi; \
     rm /etc/nginx/http.d/default.conf; \
-    mkdir -p /var/log/php${PHP_VERSION}-fpm; \
-    touch /var/log/php${PHP_VERSION}-fpm/www-slow.log
+    mkdir -p /var/log/php-fpm /etc/nginx/after.d /etc/nginx/http-conf.d; \
+    find / -xdev -type f -perm /6000 -exec chmod a-s {} +
 
 # OCI metadata labels
 LABEL org.opencontainers.image.title="adamrollogi/php-nginx" \
-      org.opencontainers.image.description="PHP-FPM + Nginx web stack on Alpine 3.21" \
+      org.opencontainers.image.description="PHP-FPM + Nginx web stack on Alpine 3.23" \
+      org.opencontainers.image.version="${PHP_PATCH_VERSION}" \
       org.opencontainers.image.source="https://github.com/adamrollogi/docker" \
       org.opencontainers.image.licenses="MIT"
 
-# Copy configuration and entrypoint files
-COPY app.conf.template /etc/nginx/http.d/app.conf.template
-COPY app-ssl.conf.template /etc/nginx/http.d/app-ssl.conf.template
-COPY app-ssl-redirect.conf.template /etc/nginx/http.d/app-ssl-redirect.conf.template
-COPY www.conf.template /etc/php${PHP_VERSION}/php-fpm.d/www.conf.template
+# Copy configuration templates (root-owned; rendered into /run at startup) and entrypoint files
+COPY app.conf.template app-ssl.conf.template app-ssl-redirect.conf.template /usr/local/etc/nginx/
+COPY www.conf.template /usr/local/etc/php/www.conf.template
 COPY supervisord-fpm.conf /etc/supervisord.d/supervisord-fpm.conf
 COPY supervisord-nginx.conf /etc/supervisord.d/supervisord-nginx.conf
 COPY index.php /var/www/html/index.php
@@ -76,16 +88,16 @@ RUN ln -s /usr/sbin/php-fpm${PHP_VERSION} /usr/sbin/php-fpm
 # Make scripts executable
 RUN chmod +x /usr/local/bin/php-nginx-entrypoint.sh /usr/local/bin/healthcheck.sh
 
-# Set ownership of runtime-writable dirs for non-root mode
-RUN mkdir -p /var/lib/nginx/logs /var/log/php${PHP_VERSION} /etc/nginx/ssl && \
-    chown appuser:appuser /etc/nginx/nginx.conf && \
+# Set ownership of runtime-writable dirs for non-root mode.
+# Config under /etc stays root-owned; rendered config is written to /run/nginx and /run/php.
+RUN mkdir -p /var/lib/nginx/logs /var/log/php${PHP_VERSION} /etc/nginx/ssl /run/nginx/http.d /run/nginx/after.d /run/php/php-fpm.d && \
     chown -R appuser:appuser \
-    /etc/nginx/http.d \
+    /run/nginx \
+    /run/php \
     /etc/nginx/ssl \
-    /etc/php${PHP_VERSION}/php-fpm.d \
     /var/log/nginx \
     /var/log/php${PHP_VERSION} \
-    /var/log/php${PHP_VERSION}-fpm \
+    /var/log/php-fpm \
     /run/nginx \
     /var/lib/nginx
 

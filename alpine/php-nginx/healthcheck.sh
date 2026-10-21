@@ -11,5 +11,5 @@ if [ "${NGINX_SSL_ENABLED}" = "true" ]; then
     fi
 else
     # HTTP-only mode
-    curl -sf "http://localhost:${NGINX_PORT:-80}/" || exit 1
+    curl -sf "http://localhost:${NGINX_PORT:-80}/health" || exit 1
 fi

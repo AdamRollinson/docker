@@ -4,3 +4,9 @@ updates:
     directory: /
     schedule:
       interval: weekly
+
+  # Keeps the digest-pinned alpine base image current
+  - package-ecosystem: docker
+    directory: /alpine/base
+    schedule:
+      interval: weekly

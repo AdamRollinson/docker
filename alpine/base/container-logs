@@ -1,0 +1,50 @@
+#!/bin/bash
+# Usage: container-logs [-f] [nginx|php-fpm|cron|supervisor|all]
+#
+# In LOG_MODE=file: tails the per-service log files under /var/log.
+# In LOG_MODE=stdout (default): explains how to filter "docker logs" by service tag.
+
+follow=""
+if [ "$1" = "-f" ]; then
+    follow="-f"
+    shift
+fi
+service="${1:-all}"
+
+if [ "${LOG_MODE:-stdout}" != "file" ]; then
+    cat <<MSG
+Logs are written to the container's stdout/stderr (LOG_MODE=stdout), tagged per service.
+Read them from the host, for example:
+
+  docker logs -f <container> 2>&1                       # everything
+  docker logs <container> 2>&1 | grep '^\[nginx\]'      # one service: nginx, php-fpm, cron, supervisor, entrypoint
+  docker logs <container> 2>&1 | grep -v '^\[nginx\]'   # everything except the access log
+
+With LOG_FORMAT=json each line is a JSON object with a "service" field:
+
+  docker logs <container> 2>&1 | jq -c 'select(.service == "php-fpm")'
+
+Set LOG_MODE=file to write one file per service under /var/log and use this command to tail them.
+MSG
+    exit 0
+fi
+
+files=()
+case "$service" in
+    nginx)      files=(/var/log/nginx/access.log /var/log/nginx/error.log) ;;
+    php-fpm)    files=(/var/log/php-fpm/error.log /var/log/php-fpm/slow.log) ;;
+    cron)       files=(/var/log/cron.log) ;;
+    supervisor) files=(/var/log/supervisord.log) ;;
+    all)        files=(/var/log/nginx/access.log /var/log/nginx/error.log /var/log/php-fpm/error.log /var/log/php-fpm/slow.log /var/log/cron.log /var/log/supervisord.log) ;;
+    *)          echo "Unknown service '$service'. Use: nginx, php-fpm, cron, supervisor or all." >&2; exit 1 ;;
+esac
+
+existing=()
+for f in "${files[@]}"; do
+    [ -f "$f" ] && existing+=("$f")
+done
+if [ "${#existing[@]}" -eq 0 ]; then
+    echo "No log files found for '$service' (this image or mode may not run that service)." >&2
+    exit 1
+fi
+exec tail -n 100 $follow "${existing[@]}"

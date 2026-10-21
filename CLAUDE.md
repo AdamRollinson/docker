@@ -6,11 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Docker image build system that produces multi-architecture (amd64/arm64) PHP container images published to Docker Hub under `adamrollogi/`. Three layered images are built:
 
-1. **`adamrollogi/base:latest`** — Alpine 3.21 base with common tools and Supervisor
+1. **`adamrollogi/base:latest`** — Alpine 3.23 base with common tools and Supervisor
 2. **`adamrollogi/php:{version}`** — PHP CLI with Composer and extensions (builds on base)
 3. **`adamrollogi/php-nginx:{version}`** — PHP-FPM + Nginx web stack (builds on php)
+4. **`adamrollogi/php-nginx-dev:{version}`** — php-nginx plus Xdebug and development defaults (builds on php-nginx)
 
-Supported PHP versions: **8.1, 8.2, 8.3, 8.4**
+Supported PHP versions: **8.2, 8.3, 8.4**
+
+The exact release for each minor version is pinned in `alpine/php-versions.txt` (format: `<minor> <release>` per line). This file is the single source of truth for both `build.sh` and the CI matrix. `alpine/check-php-versions.sh` compares the pins with the Alpine edge APKINDEX for both architectures; `--update` rewrites the file. The `php-version-bump` workflow runs that script daily and commits the result.
 
 ## Build Commands
 
@@ -19,15 +22,15 @@ Supported PHP versions: **8.1, 8.2, 8.3, 8.4**
 # From the alpine/ directory:
 cd alpine && ./build.sh
 ```
-This builds all images sequentially: base → php (×4 versions) → php-nginx (×4 versions). Images are tagged locally (e.g., `adamrollogi/php:8.3`).
+This builds all images sequentially: base → php (×3 versions) → php-nginx (×3 versions) → php-nginx-dev (×3 versions). Images are tagged locally with both the minor and the pinned release (e.g., `adamrollogi/php:8.3` and `adamrollogi/php:8.3.35`).
 
 ### Build a single image manually
 ```bash
 # Base
 docker build -t adamrollogi/base:latest ./alpine/base
 
-# PHP (version without dots as build arg, e.g., 83 for 8.3)
-docker build --build-arg PHP_VERSION=83 -t adamrollogi/php:8.3 ./alpine/php
+# PHP (version without dots as build arg, e.g., 83 for 8.3; PHP_PATCH_VERSION pins the release)
+docker build --build-arg PHP_VERSION=83 --build-arg PHP_PATCH_VERSION=8.3.35 -t adamrollogi/php:8.3 ./alpine/php
 
 # PHP-Nginx (needs both args)
 docker build --build-arg PHP_IMAGE_TAG=8.3 --build-arg PHP_VERSION=83 -t adamrollogi/php-nginx:8.3 ./alpine/php-nginx
@@ -37,14 +40,19 @@ docker build --build-arg PHP_IMAGE_TAG=8.3 --build-arg PHP_VERSION=83 -t adamrol
 
 ### Image Inheritance Chain
 ```
-Alpine 3.21
+Alpine 3.23
   └── base (supervisor, bash, curl, git, envsubst)
         └── php:{version} (PHP CLI, Composer, extensions, php.ini.template)
               └── php-nginx:{version} (Nginx, PHP-FPM, config templates)
+                    └── php-nginx-dev:{version} (Xdebug, no-cache snippet, dev php defaults)
 ```
 
 ### Configuration via Environment Variables
 All runtime configuration is done through environment variables substituted into templates at container startup via `envsubst` in entrypoint scripts. See `ENV.md` for the full variable reference.
+
+Generic overrides: any `php.<setting>` env var is appended to the rendered php.ini, `fpm.pool.<setting>` to the `[www]` pool and `fpm.global.<setting>` to the FPM `[global]` section, via `apply_ini_overrides` in `/usr/local/lib/entrypoint-lib.sh` (shipped by the php image, sourced by every entrypoint). Drop-in directories: `/etc/nginx/http-conf.d` (http block), `/etc/nginx/after.d` (inside the app server block), `/etc/nginx/http.d` (extra server blocks), plus `/run/nginx/after.d` for runtime-rendered snippets such as the dev image's no-cache location. Logging is organised per service: every long-running process is started through `/usr/local/bin/run-service <name> <cmd>` (base image), which uses bash process substitution plus busybox awk to prefix each stdout/stderr line with `[name]` (`LOG_FORMAT=text`) or wrap it as `{"time","service","stream","message"}` (`LOG_FORMAT=json`, JSON lines pass through untouched so nginx's `json_combined` access log stays structured). The entrypoints log through `log()` from `/usr/local/lib/entrypoint-lib.sh`, tagged `[entrypoint]`. `LOG_MODE=file` disables tagging and resolves the empty `NGINX_ACCESS_LOG`, `NGINX_ERROR_LOG`, `PHP_FPM_ERROR_LOG`, `PHP_FPM_SLOWLOG` defaults to per-service files under `/var/log`; `container-logs` tails them. The access log directive is assembled in the entrypoint as `NGINX_ACCESS_LOG_DIRECTIVE` (handles `off` and the json format), and `json_combined` is defined in `/run/nginx/logging.conf`, included at the top of the http block. supervisord's own messages stay untagged on stderr: wrapping supervisord would double-tag the program output it relays. IPv6 listeners are emitted by default and stripped with `sed` when `NGINX_LISTEN_IPV6=false`.
+
+Rendered config never lands in `/etc`. The php entrypoint writes `php.ini` to `/run/php` (PHP finds it via `PHPRC`); the php-nginx entrypoint writes `nginx.conf` plus server blocks to `/run/nginx` and the FPM pool plus a minimal `php-fpm.conf` to `/run/php`, then starts nginx with `-c` and php-fpm with `-y`/`-c`. Templates are shipped root-owned under `/usr/local/etc/{nginx,php}`. The stock `/etc/nginx/http.d/*.conf` include is kept so users can still mount extra server blocks there. This keeps `/etc` root-owned and makes the images work with `--read-only` plus tmpfs mounts on `/run`, `/tmp`, `/var/log` and `/var/lib/nginx`.
 
 Key convention in Nginx templates: `@@` placeholders are used instead of `$` to prevent premature variable expansion during `envsubst`, then replaced back to `$` by the entrypoint script.
 
@@ -52,8 +60,14 @@ Key convention in Nginx templates: `@@` placeholders are used instead of `$` to 
 PHP versions use two formats throughout the codebase:
 - **Dotted** (`8.3`) — used for Docker image tags and `PHP_IMAGE_TAG` build arg
 - **Stripped** (`83`) — used for `PHP_VERSION` build arg and Alpine package names (e.g., `php83-cli`)
+- **Release** (`8.3.35`) — `PHP_PATCH_VERSION` build arg, applied as an apk constraint (`php83~8.3.35`) and used as an extra image tag
 
 The build script converts between them: `PHP_VERSION_ENV=$(echo "$version" | tr -d '.')`
+
+Only the core `php83` package (and `php83-fpm` in php-nginx) carries the pin. Extension subpackages depend on `php83-common` at the exact same release so they follow automatically, and `php83-cli` / `php83-json` are virtual names provided by the core package, so they cannot be constrained. php-nginx reads `PHP_PATCH_VERSION` from the php image's `ENV` rather than taking its own build arg, so php-fpm always matches the installed PHP. Both Dockerfiles assert the installed version after `apk add` and fail the build on a mismatch. If `PHP_PATCH_VERSION` is empty, the latest release in Alpine edge is installed unpinned.
+
+### Development image (php-nginx-dev)
+`php-nginx-dev-entrypoint.sh` renders `/run/php/conf.d/50-xdebug.ini` (loaded through `PHP_INI_SCAN_DIR=:/run/php/conf.d`, which keeps the stock scan dir) when `PHP_DEBUGGER=xdebug`, renders the `NGINX_NO_CACHE_PATTERN` location into `/run/nginx/after.d/no-cache.conf`, then execs the php-nginx entrypoint. The Alpine `php8x-pecl-xdebug` package's own ini is deleted at build time so loading is runtime-controlled. Xdebug is installed from edge like PHP itself, unpinned.
 
 ### SSL / HTTPS (php-nginx only)
 Optional HTTPS support via environment variables. Disabled by default (`NGINX_SSL_ENABLED=false`).
@@ -66,7 +80,15 @@ Key implementation details:
 - `ssl_session_cache` and `ssl_session_timeout` are `http`-level directives in `nginx.conf` — the entrypoint patches them via `sed` rather than setting them per-server (shared memory zone names conflict otherwise)
 - HSTS header is stripped from the rendered config via `sed` when `NGINX_SSL_HSTS=false`
 - Self-signed certs are generated idempotently (skipped if files already exist)
-- `healthcheck.sh` wrapper detects SSL mode and checks the appropriate endpoint
+- `healthcheck.sh` wrapper detects SSL mode and always checks `/health`, never a PHP page
+- The HTTP-to-HTTPS redirect target is fixed by the entrypoint: `NGINX_SSL_REDIRECT_HOST`, else the first non-wildcard `NGINX_SERVER_NAME`, else `$host` with a startup warning (Host header reflection would otherwise be an open redirect)
+- `/.well-known/` is served (not denied as a hidden path) in all templates so ACME HTTP-01 works, including on the redirect listener
+
+### Hardening conventions
+- No setuid/setgid binaries: every Dockerfile ends its package step with `find / -xdev -type f -perm /6000 -exec chmod a-s {} +`, and `busybox-suid` is not installed
+- `index.php` is a static placeholder, never `phpinfo()` (it would print every environment variable, including secrets)
+- `PHP_EXPOSE_PHP` defaults to `Off`; `PHP_SESSION_COOKIE_SECURE` is empty and resolved by the entrypoints (`On` under SSL)
+- Alpine repositories are referenced over `https://`
 
 ### Process Management
 Supervisor manages all long-running processes inside containers:
@@ -76,9 +98,19 @@ Supervisor manages all long-running processes inside containers:
 
 ## CI/CD
 
-GitHub Actions workflow (`.github/workflows/docker-build.yml`):
-- **Triggers**: push to `main`, manual `workflow_dispatch`
-- **Build strategy**: base image first, then PHP versions in parallel (matrix strategy)
+### Automatic PHP release bumps (`.github/workflows/php-version-bump.yml`)
+- **Triggers**: daily cron, manual `workflow_dispatch`
+- Runs `alpine/check-php-versions.sh --update`. A minor is only bumped when the same release exists in edge for both `x86_64` and `aarch64`
+- Commits the change to `main` as `github-actions[bot]`, then dispatches `docker-build.yml` with `gh workflow run` (pushes made with `GITHUB_TOKEN` do not trigger other workflows on their own)
+- Needs `contents: write` and `actions: write`, which the workflow requests itself
+
+### Image build (`.github/workflows/docker-build.yml`)
+- **Triggers**: push to `main`, manual `workflow_dispatch`, weekly cron (so Alpine fixes ship without a code change)
+- **Scan before publish**: every image is pushed as `:candidate-<sha>[-<minor>]`, Trivy-scanned and VEX-attested, then promoted to its real tags with `docker buildx imagetools create`. Candidate tags are deleted via the Docker Hub API afterwards (best effort)
+- `DOCKER_PAT` is only exposed to the login and candidate-cleanup steps, never at workflow scope
+- Buildx is pinned via `BUILDX_VERSION`; Dependabot covers both GitHub Actions and the `alpine/base` Docker digest
+- **Build strategy**: a `php-matrix` job turns `alpine/php-versions.txt` into a matrix (`minor`/`patch`), base image builds first, then PHP versions in parallel
+- Each image is pushed with two tags: `:{minor}` and `:{patch}`
 - Uses **Docker Build Cloud** (`adamrollogi/medusa` endpoint) for multi-arch builds
 - Publishes to Docker Hub with SBOM and provenance attestation
 - VEX attestations via `docker/scout-action` (attestation-add command)
@@ -90,6 +122,9 @@ GitHub Actions workflow (`.github/workflows/docker-build.yml`):
 | Path | Purpose |
 |------|---------|
 | `alpine/build.sh` | Local build script for all images |
+| `alpine/php-versions.txt` | Pinned PHP release per supported minor version |
+| `alpine/check-php-versions.sh` | Compares pins with Alpine edge, `--update` rewrites the file |
+| `.github/workflows/php-version-bump.yml` | Daily job that bumps pins and dispatches the build |
 | `alpine/base/Dockerfile` | Base Alpine image with common tooling |
 | `alpine/php/Dockerfile` | PHP image with extensions and Composer |
 | `alpine/php/php.ini.template` | Runtime PHP configuration template |
@@ -101,5 +136,10 @@ GitHub Actions workflow (`.github/workflows/docker-build.yml`):
 | `alpine/php-nginx/www.conf.template` | PHP-FPM pool configuration template |
 | `alpine/php-nginx/php-nginx-entrypoint.sh` | Nginx container entrypoint (SSL logic, envsubst) |
 | `alpine/php-nginx/healthcheck.sh` | Docker HEALTHCHECK wrapper (HTTP/HTTPS aware) |
+| `alpine/base/entrypoint-lib.sh` | Shared entrypoint helpers (`log`, `json_escape`, `apply_ini_overrides`) |
+| `alpine/base/run-service` | Service wrapper that tags or JSON-wraps log lines per service |
+| `alpine/base/container-logs` | Tails per-service log files in `LOG_MODE=file` |
+| `alpine/php-nginx-dev/Dockerfile` | Xdebug development image |
+| `alpine/php-nginx-dev/php-nginx-dev-entrypoint.sh` | Renders Xdebug ini and no-cache snippet, then chains to php-nginx entrypoint |
 | `ENV.md` | Complete environment variable reference |
 | `SECURITY.md` | CVE details and VEX attestation documentation |

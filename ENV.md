@@ -1,9 +1,23 @@
 # Environment Variables Documentation
 
+## `alpine/base/Dockerfile`
+
+### Logging
+- **`LOG_MODE`**: `stdout` (default) sends every service's output to the container's stdout/stderr; `file` writes one file per service under `/var/log` (`nginx/access.log`, `nginx/error.log`, `php-fpm/error.log`, `php-fpm/slow.log`, `cron.log`).
+- **`LOG_FORMAT`**: `text` (default) prefixes each line with `[service]`; `json` emits one JSON object per line with `time`, `service`, `stream` and `message`, and switches the nginx access log to the structured `json_combined` format.
+- **`LOG_TAG`**: `true` (default) adds the `[service]` prefixes in text mode; `false` leaves lines untouched. Ignored in json and file modes.
+- Services are launched through `/usr/local/bin/run-service <name> <command>`, which implements the tagging; `container-logs [-f] [service|all]` tails the per-service files in file mode.
+
 ## `alpine/php/Dockerfile`
 
 ### PHP General Settings
 - **`PHP_VERSION`**: Specifies the PHP version to be installed. Default is `83`.
+- **`PHP_PATCH_VERSION`**: Build argument (also exported as an environment variable) pinning the exact PHP release installed, e.g. `8.3.35`. Set from `alpine/php-versions.txt` by the build script and CI.
+- **`PHPRC`**: Set to `/run/php`, where the entrypoint renders `php.ini`. Configuration under `/etc/php*` remains root-owned.
+- **`PHP_EXPOSE_PHP`**: Controls the `X-Powered-By` header. Default is `Off`.
+- **`PHP_SESSION_COOKIE_SECURE`**: Adds the `Secure` flag to session cookies. Empty by default, which resolves to `Off` in the CLI image and to `On` in php-nginx when `NGINX_SSL_ENABLED=true`.
+- **`PHP_SENDMAIL_PATH`**: Sets `sendmail_path`. Empty by default, which keeps PHP's built-in default. Use `/usr/bin/msmtp -t` or similar when a mail relay binary is installed.
+- **`php.<setting>`**: Any environment variable with this prefix is appended to php.ini as `<setting> = <value>` after the templated settings, e.g. `php.memory_limit=256M`. Works in every image.
 - **`PHP_MEMORY_LIMIT`**: Sets the maximum amount of memory a script may consume. Default is `128M`.
 - **`PHP_UPLOAD_MAX_FILESIZE`**: Defines the maximum size of an uploaded file. Default is `2M`.
 - **`PHP_POST_MAX_SIZE`**: Sets the maximum size of POST data that PHP will accept. Default is `2M`.
@@ -41,6 +55,10 @@
 
 ### PHP-FPM Settings
 - **`PHP_VERSION`**: Specifies the PHP version to be installed. Default is `83`.
+- **`PHP_FPM_ERROR_LOG`**: FPM master and pool error log. Empty by default, which resolves to `/proc/self/fd/2` (container stderr) or `/var/log/php-fpm/error.log` when `LOG_MODE=file`.
+- **`PHP_FPM_SLOWLOG`**: Slow request log. Empty by default, which resolves to `/proc/self/fd/2` or `/var/log/php-fpm/slow.log` when `LOG_MODE=file`.
+- **`fpm.pool.<setting>`**: Appended to the `[www]` pool, e.g. `fpm.pool.pm.max_children=50`.
+- **`fpm.global.<setting>`**: Appended to the FPM `[global]` section, e.g. `fpm.global.log_level=debug`.
 - **`PHP_FPM_LISTEN`**: Defines the address on which PHP-FPM will listen. Default is `127.0.0.1:9000`.
 - **`PHP_FPM_MAX_CHILDREN`**: Sets the maximum number of child processes to be created. Default is `30`.
 - **`PHP_FPM_START_SERVERS`**: Sets the number of child processes created on startup. Default is `5`.
@@ -70,8 +88,28 @@ All SSL settings are opt-in. When `NGINX_SSL_ENABLED` is `false` (the default), 
 - **`NGINX_SSL_SESSION_CACHE`**: SSL session cache configuration. Default is `shared:SSL:10m`.
 - **`NGINX_SSL_REDIRECT`**: Whether to redirect HTTP requests to HTTPS when SSL is enabled. Default is `true`.
 - **`NGINX_SSL_REDIRECT_PORT`**: Port for the HTTP-to-HTTPS redirect listener. Defaults to the value of `NGINX_PORT`.
+- **`NGINX_LISTEN_IPV6`**: Adds `listen [::]:<port>` alongside the IPv4 listener. Default is `true`; set `false` on hosts where IPv6 is disabled in the kernel.
+- **`NGINX_ACCESS_LOG`**: Access log destination. Empty by default, which resolves to `/dev/stdout` or `/var/log/nginx/access.log` when `LOG_MODE=file`. Use `off` to disable.
+- **`NGINX_ERROR_LOG`**: Error log destination for both the `http` block and the app server. Empty by default, which resolves to `/dev/stderr` or `/var/log/nginx/error.log` when `LOG_MODE=file`.
+- **`NGINX_SSL_REDIRECT_HOST`**: Host written into the HTTP-to-HTTPS redirect. Defaults to the first entry of `NGINX_SERVER_NAME`; when that is `_`, a wildcard or a regex, the request `Host` header is used and a warning is logged at startup.
 - **`NGINX_SSL_SELF_SIGNED`**: Auto-generate a self-signed certificate at startup (for development). Default is `false`.
 - **`NGINX_SSL_SELF_SIGNED_CN`**: Common Name and SAN for the self-signed certificate. Default is `localhost`.
 - **`NGINX_SSL_SELF_SIGNED_DAYS`**: Validity period in days for the self-signed certificate. Default is `365`.
 - **`NGINX_SSL_HSTS`**: Enable `Strict-Transport-Security` header on HTTPS responses. Default is `true`.
 - **`NGINX_SSL_HSTS_MAX_AGE`**: HSTS max-age value in seconds. Default is `63072000` (2 years).
+
+## `alpine/php-nginx-dev/Dockerfile`
+
+Inherits everything from php-nginx and adds:
+
+- **`PHP_DEBUGGER`**: `xdebug` (default) loads Xdebug with the settings below; `none` leaves it unloaded.
+- **`XDEBUG_MODE`**: Default `develop,debug`.
+- **`XDEBUG_START_WITH_REQUEST`**: Default `trigger`. Use `yes` to debug every request.
+- **`XDEBUG_CLIENT_HOST`** / **`XDEBUG_CLIENT_PORT`**: Default `host.docker.internal` / `9003`.
+- **`XDEBUG_DISCOVER_CLIENT_HOST`**: Default `false`.
+- **`XDEBUG_IDEKEY`**: Default `PHPSTORM`.
+- **`XDEBUG_OUTPUT_DIR`**: Default `/tmp/xdebug`.
+- **`XDEBUG_LOG_LEVEL`**: Default `3`.
+- **`NGINX_NO_CACHE_PATTERN`**: Regex of asset paths served with `Cache-Control: no-store` and `sendfile off`. Default matches common static extensions; empty disables the snippet.
+- **`PHP_INI_SCAN_DIR`**: Set to `:/run/php/conf.d` so the rendered Xdebug ini is loaded in addition to the stock `conf.d`.
+- Overrides `PHP_DISPLAY_ERRORS=On` and `PHP_ERROR_REPORTING=E_ALL`.

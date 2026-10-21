@@ -4,11 +4,18 @@ FROM adamrollogi/base:latest
 # Switch to root for package installation
 USER root
 
-# Define a build-time argument for PHP version
+# Define build-time arguments for the PHP version:
+#   PHP_VERSION       - minor version without dots, used in Alpine package names (e.g. 83)
+#   PHP_PATCH_VERSION - exact release to pin (e.g. 8.3.35); empty installs whatever edge has
 ARG PHP_VERSION
+ARG PHP_PATCH_VERSION
 
-# Set the PHP version as an environment variable
-ENV PHP_VERSION=${PHP_VERSION}
+# Expose both so downstream images (php-nginx) install a matching php-fpm
+ENV PHP_VERSION=${PHP_VERSION} \
+    PHP_PATCH_VERSION=${PHP_PATCH_VERSION}
+
+# Rendered php.ini lives in /run/php (see entrypoint), keeping /etc/php* root-owned
+ENV PHPRC=/run/php
 
 # PHP General Settings
 ENV PHP_MEMORY_LIMIT=128M
@@ -33,25 +40,30 @@ ENV OPCACHE_LOG_VERBOSITY_LEVEL=1
 ENV OPCACHE_ERROR_LOG=/var/log/php-opcache.log
 
 # PHP Security Settings (configurable, permissive defaults for base image)
-ENV PHP_EXPOSE_PHP=On \
+ENV PHP_EXPOSE_PHP=Off \
     PHP_DISABLE_FUNCTIONS="" \
     PHP_ALLOW_URL_FOPEN=On \
     PHP_ALLOW_URL_INCLUDE=Off \
     PHP_OPEN_BASEDIR="" \
     PHP_SESSION_COOKIE_HTTPONLY=On \
+    PHP_SESSION_COOKIE_SECURE="" \
     PHP_SESSION_COOKIE_SAMESITE=Lax \
     PHP_SESSION_USE_STRICT_MODE=On \
     PHP_CGI_FIX_PATHINFO=0 \
-    PHP_MAX_INPUT_VARS=1000
+    PHP_MAX_INPUT_VARS=1000 \
+    PHP_SENDMAIL_PATH=""
 
-# Install PHP with scoped edge repos (prevents edge repos leaking to downstream images)
+# Install PHP with scoped edge repos (prevents edge repos leaking to downstream images).
+# Only the core package carries the version pin: the extension subpackages depend on
+# php${PHP_VERSION}-common at the exact same release, and -cli / -json are virtual
+# names provided by the core package, so they cannot be constrained directly.
 RUN set -eux; \
     apk update && apk upgrade; \
     apk add --no-cache \
-        --repository=http://dl-cdn.alpinelinux.org/alpine/edge/main \
-        --repository=http://dl-cdn.alpinelinux.org/alpine/edge/community \
-        --repository=http://dl-cdn.alpinelinux.org/alpine/edge/testing \
-        php${PHP_VERSION} \
+        --repository=https://dl-cdn.alpinelinux.org/alpine/edge/main \
+        --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community \
+        --repository=https://dl-cdn.alpinelinux.org/alpine/edge/testing \
+        php${PHP_VERSION}${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
         php${PHP_VERSION}-cli \
         php${PHP_VERSION}-json \
         php${PHP_VERSION}-mbstring \
@@ -80,7 +92,14 @@ RUN set -eux; \
         php${PHP_VERSION}-bcmath \
         php${PHP_VERSION}-ctype \
         php${PHP_VERSION}-iconv \
-        php${PHP_VERSION}-session
+        php${PHP_VERSION}-session; \
+    if [ -n "${PHP_PATCH_VERSION}" ]; then \
+        installed="$(php${PHP_VERSION} -r 'echo PHP_VERSION;')"; \
+        if [ "${installed}" != "${PHP_PATCH_VERSION}" ]; then \
+            echo "ERROR: pinned PHP ${PHP_PATCH_VERSION} but ${installed} was installed"; exit 1; \
+        fi; \
+    fi; \
+    find / -xdev -type f -perm /6000 -exec chmod a-s {} +
 
 # Symlink php binary
 RUN rm -f /usr/bin/php && ln -s /usr/bin/php${PHP_VERSION} /usr/bin/php
@@ -97,11 +116,12 @@ RUN curl -sS https://getcomposer.org/installer -o composer-setup.php && \
 
 # OCI metadata labels
 LABEL org.opencontainers.image.title="adamrollogi/php" \
-      org.opencontainers.image.description="PHP CLI with Composer and extensions on Alpine 3.21" \
+      org.opencontainers.image.description="PHP CLI with Composer and extensions on Alpine 3.23" \
+      org.opencontainers.image.version="${PHP_PATCH_VERSION}" \
       org.opencontainers.image.source="https://github.com/adamrollogi/docker" \
       org.opencontainers.image.licenses="MIT"
 
-# Copy entrypoint script
+# Copy entrypoint script (shared helpers come from the base image at /usr/local/lib/entrypoint-lib.sh)
 COPY php-entrypoint.sh /usr/local/bin/
 
 # Make the entrypoint script executable
@@ -110,10 +130,9 @@ RUN chmod +x /usr/local/bin/php-entrypoint.sh
 # Copy the custom PHP ini template
 COPY php.ini.template /usr/local/etc/php/
 
-# Set ownership of PHP config and log dirs for non-root runtime
-RUN chown -R appuser:appuser \
-    /etc/php${PHP_VERSION} \
-    /var/log
+# Runtime-rendered config goes to /run/php; /etc/php* stays root-owned
+RUN mkdir -p /run/php && \
+    chown -R appuser:appuser /run/php /var/log
 
 # Default to non-root user
 USER appuser

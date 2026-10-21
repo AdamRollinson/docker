@@ -1,9 +1,12 @@
 #!/bin/bash
 set -e
 
+# shellcheck source=../base/entrypoint-lib.sh
+. /usr/local/lib/entrypoint-lib.sh
+
 # Ensure PHP_VERSION is set
 if [ -z "$PHP_VERSION" ]; then
-  echo "Error: PHP_VERSION environment variable is not set."
+  log "ERROR: PHP_VERSION environment variable is not set."
   exit 1
 fi
 
@@ -13,6 +16,70 @@ fi
 
 # Default redirect port to the HTTP port if not explicitly set
 export NGINX_SSL_REDIRECT_PORT="${NGINX_SSL_REDIRECT_PORT:-${NGINX_PORT:-80}}"
+
+# Fix the HTTPS redirect target so the client-supplied Host header is never reflected.
+# Priority: NGINX_SSL_REDIRECT_HOST, then the first non-wildcard server_name, then $host.
+if [ -z "${NGINX_SSL_REDIRECT_HOST}" ]; then
+    FIRST_SERVER_NAME="${NGINX_SERVER_NAME%% *}"
+    case "${FIRST_SERVER_NAME}" in
+        ""|_|*\**|~*) NGINX_SSL_REDIRECT_HOST='@@host' ;;
+        *)             NGINX_SSL_REDIRECT_HOST="${FIRST_SERVER_NAME}" ;;
+    esac
+fi
+export NGINX_SSL_REDIRECT_HOST
+
+# Omit the port from the redirect when HTTPS is on the default port
+if [ "${NGINX_SSL_PORT:-443}" = "443" ]; then
+    export NGINX_SSL_REDIRECT_PORT_SUFFIX=""
+else
+    export NGINX_SSL_REDIRECT_PORT_SUFFIX=":${NGINX_SSL_PORT}"
+fi
+
+# Session cookies default to Secure whenever HTTPS is enabled
+if [ -z "${PHP_SESSION_COOKIE_SECURE}" ]; then
+    if [ "${NGINX_SSL_ENABLED}" = "true" ]; then
+        export PHP_SESSION_COOKIE_SECURE=On
+    else
+        export PHP_SESSION_COOKIE_SECURE=Off
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Log destinations
+# ---------------------------------------------------------------------------
+
+# Empty log variables resolve from LOG_MODE: stdout streams by default, one file per
+# service under /var/log when LOG_MODE=file.
+if [ "${LOG_MODE:-stdout}" = "file" ]; then
+    export NGINX_ACCESS_LOG="${NGINX_ACCESS_LOG:-/var/log/nginx/access.log}"
+    export NGINX_ERROR_LOG="${NGINX_ERROR_LOG:-/var/log/nginx/error.log}"
+    export PHP_FPM_ERROR_LOG="${PHP_FPM_ERROR_LOG:-/var/log/php-fpm/error.log}"
+    export PHP_FPM_SLOWLOG="${PHP_FPM_SLOWLOG:-/var/log/php-fpm/slow.log}"
+else
+    export NGINX_ACCESS_LOG="${NGINX_ACCESS_LOG:-/dev/stdout}"
+    export NGINX_ERROR_LOG="${NGINX_ERROR_LOG:-/dev/stderr}"
+    export PHP_FPM_ERROR_LOG="${PHP_FPM_ERROR_LOG:-/proc/self/fd/2}"
+    export PHP_FPM_SLOWLOG="${PHP_FPM_SLOWLOG:-/proc/self/fd/2}"
+fi
+
+# Access log directive: "off" disables it; json mode uses the json_combined format
+# (defined in /run/nginx/logging.conf) so each line is a self-describing JSON object.
+if [ "${NGINX_ACCESS_LOG}" = "off" ]; then
+    export NGINX_ACCESS_LOG_DIRECTIVE="access_log off"
+elif [ "${LOG_FORMAT:-text}" = "json" ] && [ "${LOG_MODE:-stdout}" = "stdout" ]; then
+    export NGINX_ACCESS_LOG_DIRECTIVE="access_log ${NGINX_ACCESS_LOG} json_combined"
+else
+    export NGINX_ACCESS_LOG_DIRECTIVE="access_log ${NGINX_ACCESS_LOG} combined"
+fi
+
+# ---------------------------------------------------------------------------
+# Runtime config locations (kept out of /etc so the config tree stays root-owned)
+# ---------------------------------------------------------------------------
+
+NGINX_RUN_DIR=/run/nginx
+PHP_RUN_DIR=/run/php
+NGINX_TEMPLATE_DIR=/usr/local/etc/nginx
+mkdir -p "${NGINX_RUN_DIR}/http.d" "${NGINX_RUN_DIR}/after.d" "${PHP_RUN_DIR}/php-fpm.d"
 
 # ---------------------------------------------------------------------------
 # Self-signed certificate generation
@@ -25,12 +92,12 @@ if [ "${NGINX_SSL_ENABLED}" = "true" ] && [ "${NGINX_SSL_SELF_SIGNED}" = "true" 
     CERT_DAYS="${NGINX_SSL_SELF_SIGNED_DAYS:-365}"
 
     if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
-        echo "INFO: Generating self-signed certificate for CN=${CERT_CN} (valid ${CERT_DAYS} days)..."
+        log "INFO: Generating self-signed certificate for CN=${CERT_CN} (valid ${CERT_DAYS} days)..."
 
         CERT_DIR=$(dirname "$CERT_FILE")
         KEY_DIR=$(dirname "$KEY_FILE")
         mkdir -p "$CERT_DIR" "$KEY_DIR" 2>/dev/null || {
-            echo "ERROR: Cannot create SSL directory. Check volume mount permissions."
+            log "ERROR: Cannot create SSL directory. Check volume mount permissions."
             exit 1
         }
 
@@ -45,9 +112,9 @@ if [ "${NGINX_SSL_ENABLED}" = "true" ] && [ "${NGINX_SSL_SELF_SIGNED}" = "true" 
         chmod 644 "$CERT_FILE"
         chmod 600 "$KEY_FILE"
 
-        echo "INFO: Self-signed certificate generated at ${CERT_FILE}"
+        log "INFO: Self-signed certificate generated at ${CERT_FILE}"
     else
-        echo "INFO: Self-signed cert requested but files already exist — skipping generation."
+        log "INFO: Self-signed cert requested but files already exist — skipping generation."
     fi
 fi
 
@@ -60,16 +127,16 @@ if [ "${NGINX_SSL_ENABLED}" = "true" ]; then
     KEY_FILE="${NGINX_SSL_CERTIFICATE_KEY:-/etc/nginx/ssl/key.pem}"
 
     if [ ! -r "$CERT_FILE" ]; then
-        echo "ERROR: SSL certificate not found or not readable: ${CERT_FILE}"
-        echo "  Mount your certificate with: -v /path/to/cert.pem:${CERT_FILE}:ro"
-        echo "  Or enable self-signed mode: -e NGINX_SSL_SELF_SIGNED=true"
+        log "ERROR: SSL certificate not found or not readable: ${CERT_FILE}"
+        log "  Mount your certificate with: -v /path/to/cert.pem:${CERT_FILE}:ro"
+        log "  Or enable self-signed mode: -e NGINX_SSL_SELF_SIGNED=true"
         exit 1
     fi
 
     if [ ! -r "$KEY_FILE" ]; then
-        echo "ERROR: SSL private key not found or not readable: ${KEY_FILE}"
-        echo "  Mount your key with: -v /path/to/key.pem:${KEY_FILE}:ro"
-        echo "  Or enable self-signed mode: -e NGINX_SSL_SELF_SIGNED=true"
+        log "ERROR: SSL private key not found or not readable: ${KEY_FILE}"
+        log "  Mount your key with: -v /path/to/key.pem:${KEY_FILE}:ro"
+        log "  Or enable self-signed mode: -e NGINX_SSL_SELF_SIGNED=true"
         exit 1
     fi
 fi
@@ -78,44 +145,69 @@ fi
 # Nginx template assembly
 # ---------------------------------------------------------------------------
 
+# Start from the stock nginx.conf: route the http-level error log, add the http-level
+# drop-in directory (/etc/nginx/http-conf.d) and point the server-block include at the
+# rendered directory while still honouring custom server blocks in /etc/nginx/http.d.
+rm -f "${NGINX_RUN_DIR}"/http.d/*.conf
+cat > "${NGINX_RUN_DIR}/logging.conf" <<'NGINX_LOGGING'
+log_format json_combined escape=json
+    '{"time":"$time_iso8601","service":"nginx","stream":"access",'
+    '"remote_addr":"$remote_addr","x_forwarded_for":"$http_x_forwarded_for","host":"$host",'
+    '"method":"$request_method","uri":"$request_uri","protocol":"$server_protocol",'
+    '"status":$status,"bytes_sent":$body_bytes_sent,"request_time":$request_time,'
+    '"upstream_time":"$upstream_response_time","referer":"$http_referer","user_agent":"$http_user_agent"}';
+NGINX_LOGGING
+sed \
+    -e "s|^error_log [^;]*;|error_log ${NGINX_ERROR_LOG} warn;|" \
+    -e "s|include /etc/nginx/http.d/\*.conf;|include ${NGINX_RUN_DIR}/logging.conf;\n    include /etc/nginx/http-conf.d/*.conf;\n    include /etc/nginx/http.d/*.conf;\n    include ${NGINX_RUN_DIR}/http.d/*.conf;|" \
+    /etc/nginx/nginx.conf > "${NGINX_RUN_DIR}/nginx.conf"
+
+# The "user" directive only applies when the master runs as root; drop it otherwise so
+# nginx does not emit a warning on every non-root start
+if [ "$(id -u)" != "0" ]; then
+    sed -i '/^user /d' "${NGINX_RUN_DIR}/nginx.conf"
+fi
+
 if [ "${NGINX_SSL_ENABLED}" = "true" ]; then
     # Process SSL server block
-    envsubst < /etc/nginx/http.d/app-ssl.conf.template > /etc/nginx/http.d/app-ssl.conf
-    sed -i 's/@@/$/g' /etc/nginx/http.d/app-ssl.conf
+    envsubst < "${NGINX_TEMPLATE_DIR}/app-ssl.conf.template" > "${NGINX_RUN_DIR}/http.d/app-ssl.conf"
+    sed -i 's/@@/$/g' "${NGINX_RUN_DIR}/http.d/app-ssl.conf"
 
     # Strip HSTS header if disabled
     if [ "${NGINX_SSL_HSTS}" != "true" ]; then
-        sed -i '/Strict-Transport-Security/d' /etc/nginx/http.d/app-ssl.conf
-        echo "INFO: HSTS header disabled."
+        sed -i '/Strict-Transport-Security/d' "${NGINX_RUN_DIR}/http.d/app-ssl.conf"
+        log "INFO: HSTS header disabled."
     fi
 
     # Process redirect or plain HTTP template
     if [ "${NGINX_SSL_REDIRECT}" = "true" ]; then
-        envsubst < /etc/nginx/http.d/app-ssl-redirect.conf.template > /etc/nginx/http.d/app-ssl-redirect.conf
-        sed -i 's/@@/$/g' /etc/nginx/http.d/app-ssl-redirect.conf
-        echo "INFO: SSL enabled — HTTPS on port ${NGINX_SSL_PORT:-443}, HTTP->HTTPS redirect on port ${NGINX_SSL_REDIRECT_PORT}."
+        envsubst < "${NGINX_TEMPLATE_DIR}/app-ssl-redirect.conf.template" > "${NGINX_RUN_DIR}/http.d/app-ssl-redirect.conf"
+        sed -i 's/@@/$/g' "${NGINX_RUN_DIR}/http.d/app-ssl-redirect.conf"
+        if [ "${NGINX_SSL_REDIRECT_HOST}" = '@@host' ]; then
+            log "WARNING: HTTP->HTTPS redirect reflects the request Host header. Set NGINX_SERVER_NAME or NGINX_SSL_REDIRECT_HOST to pin it."
+        fi
+        log "INFO: SSL enabled — HTTPS on port ${NGINX_SSL_PORT:-443}, HTTP->HTTPS redirect on port ${NGINX_SSL_REDIRECT_PORT}."
     else
-        echo "INFO: SSL enabled — HTTPS on port ${NGINX_SSL_PORT:-443}, no HTTP redirect."
+        log "INFO: SSL enabled — HTTPS on port ${NGINX_SSL_PORT:-443}, no HTTP redirect."
     fi
 
-    # Remove the plain HTTP template output (not used in SSL mode)
-    rm -f /etc/nginx/http.d/app.conf
-
-    # Patch http-level SSL settings in nginx.conf (session cache/timeout are
-    # defined there as shared memory zones and cannot be overridden per-server).
-    # Use temp file + cp because sed -i needs write access to the directory.
-    NGINX_CONF_TMP=$(mktemp)
-    sed \
+    # Patch http-level SSL settings (session cache/timeout are defined there as
+    # shared memory zones and cannot be overridden per-server).
+    sed -i \
         -e "s|ssl_session_cache shared:SSL:[^;]*;|ssl_session_cache ${NGINX_SSL_SESSION_CACHE};|" \
         -e "s|ssl_session_timeout [^;]*;|ssl_session_timeout ${NGINX_SSL_SESSION_TIMEOUT};|" \
         -e "s|ssl_protocols [^;]*;|ssl_protocols ${NGINX_SSL_PROTOCOLS};|" \
-        /etc/nginx/nginx.conf > "$NGINX_CONF_TMP"
-    cat "$NGINX_CONF_TMP" > /etc/nginx/nginx.conf
-    rm -f "$NGINX_CONF_TMP"
+        "${NGINX_RUN_DIR}/nginx.conf"
 else
     # HTTP-only mode (default, backward compatible)
-    envsubst < /etc/nginx/http.d/app.conf.template > /etc/nginx/http.d/app.conf
-    sed -i 's/@@/$/g' /etc/nginx/http.d/app.conf
+    envsubst < "${NGINX_TEMPLATE_DIR}/app.conf.template" > "${NGINX_RUN_DIR}/http.d/app.conf"
+    sed -i 's/@@/$/g' "${NGINX_RUN_DIR}/http.d/app.conf"
+fi
+
+# Drop the IPv6 listeners when disabled (e.g. hosts with net.ipv6.conf.all.disable_ipv6=1)
+if [ "${NGINX_LISTEN_IPV6}" != "true" ]; then
+    sed -i '/listen \[::\]/d' "${NGINX_RUN_DIR}"/http.d/*.conf
+    log "INFO: IPv6 listeners disabled."
 fi
 
 # ---------------------------------------------------------------------------
@@ -126,12 +218,12 @@ if [ "$(id -u)" != "0" ]; then
     if [ "${NGINX_SSL_ENABLED}" = "true" ]; then
         SSL_PORT="${NGINX_SSL_PORT:-443}"
         if [ "$SSL_PORT" -lt 1024 ] 2>/dev/null; then
-            echo "WARNING: SSL port ${SSL_PORT} requires root. Use --user root or set NGINX_SSL_PORT to 8443+."
+            log "WARNING: SSL port ${SSL_PORT} requires root. Use --user root or set NGINX_SSL_PORT to 8443+."
         fi
         if [ "${NGINX_SSL_REDIRECT}" = "true" ]; then
             REDIR_PORT="${NGINX_SSL_REDIRECT_PORT}"
             if [ "$REDIR_PORT" -lt 1024 ] 2>/dev/null; then
-                echo "WARNING: Redirect port ${REDIR_PORT} requires root. Use --user root or set NGINX_SSL_REDIRECT_PORT to 8080+."
+                log "WARNING: Redirect port ${REDIR_PORT} requires root. Use --user root or set NGINX_SSL_REDIRECT_PORT to 8080+."
             fi
         fi
     fi
@@ -141,16 +233,23 @@ fi
 # PHP / FPM config (unchanged)
 # ---------------------------------------------------------------------------
 
-# Replace environment variables in php.ini.template
-envsubst < /usr/local/etc/php/php.ini.template > /etc/php${PHP_VERSION}/php.ini
-
-# Replace fpm environment variables in the www.conf.template file
-envsubst < /etc/php${PHP_VERSION}/php-fpm.d/www.conf.template > /etc/php${PHP_VERSION}/php-fpm.d/www.conf
+# Render php.ini (PHPRC points PHP at /run/php) and the FPM pool into /run/php
+envsubst < /usr/local/etc/php/php.ini.template > "${PHP_RUN_DIR}/php.ini"
+envsubst < /usr/local/etc/php/www.conf.template > "${PHP_RUN_DIR}/php-fpm.d/www.conf"
 
 # When running as non-root, php-fpm cannot switch to user/group — remove directives
 if [ "$(id -u)" != "0" ]; then
-    sed -i '/^user = /d; /^group = /d' /etc/php${PHP_VERSION}/php-fpm.d/www.conf
+    sed -i '/^user = /d; /^group = /d' "${PHP_RUN_DIR}/php-fpm.d/www.conf"
 fi
+
+# FPM master config: global settings, then fpm.global.* overrides, then the pool include
+printf '[global]\nerror_log = %s\n' "${PHP_FPM_ERROR_LOG}" > "${PHP_RUN_DIR}/php-fpm.conf"
+apply_ini_overrides fpm.global "${PHP_RUN_DIR}/php-fpm.conf"
+printf '\ninclude=%s/php-fpm.d/*.conf\n' "${PHP_RUN_DIR}" >> "${PHP_RUN_DIR}/php-fpm.conf"
+
+# Generic overrides: php.<setting> into php.ini, fpm.pool.<setting> into the [www] pool
+apply_ini_overrides php "${PHP_RUN_DIR}/php.ini"
+apply_ini_overrides fpm.pool "${PHP_RUN_DIR}/php-fpm.d/www.conf"
 
 # Check if OPcache logging directory exists, create if needed (best-effort for non-root)
 if [ -n "$OPCACHE_ERROR_LOG" ]; then
@@ -160,8 +259,8 @@ if [ -n "$OPCACHE_ERROR_LOG" ]; then
     chmod 666 "$OPCACHE_ERROR_LOG" 2>/dev/null || true
 fi
 
-# Create nginx log directory (best-effort for non-root)
-mkdir -p /var/log/nginx 2>/dev/null || true
+# Create log directories (best-effort for non-root; needed when /var/log is a tmpfs)
+mkdir -p /var/log/nginx "/var/log/php${PHP_VERSION}" /var/log/php-fpm /var/lib/nginx/tmp /var/lib/nginx/logs 2>/dev/null || true
 
 if [ "$(id -u)" = "0" ]; then
     # Root mode: full supervisor with cron, nginx, php-fpm
@@ -169,15 +268,15 @@ if [ "$(id -u)" = "0" ]; then
 else
     # Non-root mode: run nginx + php-fpm directly (no supervisor/cron)
     if [[ "$*" == *supervisord* ]]; then
-        echo "INFO: Running as non-root (UID $(id -u)). Starting nginx + php-fpm directly."
-        echo "INFO: Cron is not available in non-root mode. Use --user root for full supervisor mode."
+        log "INFO: Running as non-root (UID $(id -u)). Starting nginx + php-fpm directly."
+        log "INFO: Cron is not available in non-root mode. Use --user root for full supervisor mode."
 
-        # Start php-fpm in background
-        /usr/sbin/php-fpm --nodaemonize &
+        # Start php-fpm in background (run-service tags its log lines per LOG_FORMAT/LOG_TAG)
+        run-service php-fpm /usr/sbin/php-fpm --nodaemonize -y "${PHP_RUN_DIR}/php-fpm.conf" -c "${PHP_RUN_DIR}/php.ini" &
         PHP_FPM_PID=$!
 
         # Start nginx in foreground-ish
-        /usr/sbin/nginx -g 'daemon off;' &
+        run-service nginx /usr/sbin/nginx -c "${NGINX_RUN_DIR}/nginx.conf" -g 'daemon off;' &
         NGINX_PID=$!
 
         # Trap signals for clean shutdown

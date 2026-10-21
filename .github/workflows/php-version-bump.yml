@@ -1,0 +1,47 @@
+name: Bump Pinned PHP Versions
+
+# Checks Alpine edge daily for newer PHP releases. When one has landed for every
+# architecture we build, the pin in alpine/php-versions.txt is updated, committed
+# to main and the Docker build workflow is dispatched so the new images are
+# built and pushed without manual intervention.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: php-version-bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Compare pinned releases with Alpine edge
+        run: alpine/check-php-versions.sh --update
+
+      # Pushes made with GITHUB_TOKEN do not trigger other workflows, so the build
+      # workflow is dispatched explicitly after the commit lands.
+      - name: Commit bump and trigger build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet alpine/php-versions.txt; then
+            echo "Nothing to bump"
+            exit 0
+          fi
+          releases=$(git diff -U0 alpine/php-versions.txt | awk '/^\+[0-9]/ { print $2 }' | paste -sd, - | sed 's/,/, /g')
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Bump pinned PHP releases to ${releases}"
+          git push origin HEAD:main
+          gh workflow run docker-build.yml --ref main
+          echo "Bumped to ${releases} and dispatched docker-build.yml"

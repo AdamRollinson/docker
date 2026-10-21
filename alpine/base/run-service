@@ -1,0 +1,38 @@
+#!/bin/bash
+# Usage: run-service <service-name> <command> [args...]
+#
+# Runs a service so its stdout and stderr lines carry the service name, which makes
+# "docker logs" filterable per service:
+#   LOG_FORMAT=text  ->  [nginx] 172.17.0.1 - - [21/Oct/2026:17:34:48 +0000] "GET / HTTP/1.1" 200 ...
+#   LOG_FORMAT=json  ->  {"time":"...","service":"nginx","stream":"stdout","message":"..."}
+# Lines that are already JSON objects (e.g. nginx's json_combined access log) pass through
+# untouched in json mode. Tagging is skipped when LOG_MODE=file or LOG_TAG=false.
+
+set -e
+name="$1"
+shift
+
+tag_stream() {
+    local stream="$1"
+    case "${LOG_FORMAT:-text}" in
+        json)
+            exec awk -v svc="$name" -v stream="$stream" '
+                /^\{/ { print; fflush(); next }
+                {
+                    gsub(/\\/, "\\\\"); gsub(/"/, "\\\""); gsub(/\t/, "\\t"); gsub(/\r/, "")
+                    printf "{\"time\":\"%s\",\"service\":\"%s\",\"stream\":\"%s\",\"message\":\"%s\"}\n",
+                        strftime("%Y-%m-%dT%H:%M:%S%z"), svc, stream, $0
+                    fflush()
+                }'
+            ;;
+        *)
+            exec awk -v svc="$name" '{ printf "[%s] %s\n", svc, $0; fflush() }'
+            ;;
+    esac
+}
+
+if [ "${LOG_MODE:-stdout}" = "stdout" ] && { [ "${LOG_TAG:-true}" = "true" ] || [ "${LOG_FORMAT:-text}" = "json" ]; }; then
+    exec > >(tag_stream stdout) 2> >(tag_stream stderr >&2)
+fi
+
+exec "$@"

@@ -1,0 +1,15 @@
+# Pinned PHP releases, one per line: <minor> <release>
+#
+# build.sh and .github/workflows/docker-build.yml read this file. The release
+# is passed to the Dockerfiles as PHP_PATCH_VERSION and enforced with an apk
+# version constraint, so a build fails instead of silently installing a
+# different PHP. Images are tagged with both values (php:8.3 and php:8.3.35).
+#
+# The release must exist in Alpine edge (community, or testing for 8.2). Check
+# the current packages with:
+#   docker run --rm alpine:3.23 apk search -x \
+#     --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community \
+#     --repository=https://dl-cdn.alpinelinux.org/alpine/edge/testing php84
+8.2 8.2.34
+8.3 8.3.35
+8.4 8.4.26

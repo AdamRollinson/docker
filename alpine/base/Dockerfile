@@ -1,12 +1,19 @@
 # Use Alpine as the base image, pinned to digest for supply chain security
-FROM alpine:3.21@sha256:c3f8e73fdb79deaebaa2037150150191b9dcbfba68b4a46d70103204c53f4709
+FROM alpine:3.23@sha256:85fe1e81d6758c208f3e1eed4338a1997e19d4be002d4dd32d3100c9a8c010a0
 
 # Set environment variables
 ENV LANG=C.UTF-8 \
     TZ=UTC
 
-# Install dependencies
-RUN apk add --no-cache \
+# Logging: LOG_MODE stdout (tagged per service on the container's stdout/stderr) or file
+# (one file per service under /var/log); LOG_FORMAT text or json; LOG_TAG adds [service] prefixes
+ENV LOG_MODE=stdout \
+    LOG_FORMAT=text \
+    LOG_TAG=true
+
+# Upgrade the Alpine release packages first so security fixes land before our own installs
+RUN apk upgrade --no-cache && \
+    apk add --no-cache \
     bash \
     curl \
     tzdata \
@@ -16,20 +23,17 @@ RUN apk add --no-cache \
     wget \
     nano \
     supervisor \
-    busybox-suid \
     shadow \
-    libc6-compat \
+    gcompat \
     py3-pip \
-    envsubst \
+    gettext-envsubst \
     tini && \
-    # Upgrade curl from Alpine edge to fix CVE-2025-14017, CVE-2025-13034,
-    # CVE-2025-15079, CVE-2025-14819, CVE-2025-14524, CVE-2025-10966, CVE-2025-15224
-    apk add --no-cache --upgrade \
-        --repository=http://dl-cdn.alpinelinux.org/alpine/edge/main \
-        curl libcurl && \
-    # Upgrade setuptools to fix CVE-2025-47273 (path traversal in PackageIndex)
-    pip3 install --no-cache-dir --break-system-packages 'setuptools>=78.1.1,<81' && \
+    # Alpine's py3-setuptools (80.x) is affected by CVE-2026-59890, fixed in 83.0.0.
+    # supervisor 4.3.0 uses importlib rather than pkg_resources, so no upper bound is needed.
+    pip3 install --no-cache-dir --break-system-packages --root-user-action=ignore 'setuptools>=83.0.0' && \
     apk del py3-pip && \
+    # Remove setuid/setgid bits: nothing in these images needs privilege escalation helpers
+    find / -xdev -type f -perm /6000 -exec chmod a-s {} + && \
     # Set timezone
     ln -sf /usr/share/zoneinfo/${TZ} /etc/localtime && \
     echo "${TZ}" > /etc/timezone && \
@@ -40,7 +44,7 @@ RUN apk add --no-cache \
 
 # OCI metadata labels
 LABEL org.opencontainers.image.title="adamrollogi/base" \
-      org.opencontainers.image.description="Alpine 3.21 base with Supervisor and common tools" \
+      org.opencontainers.image.description="Alpine 3.23 base with Supervisor and common tools" \
       org.opencontainers.image.source="https://github.com/adamrollogi/docker" \
       org.opencontainers.image.licenses="MIT"
 
@@ -56,6 +60,11 @@ RUN chown appuser:appuser /app
 
 # Copy only necessary configuration files
 COPY --chown=root:root supervisord.conf /etc/supervisord.conf
+
+# Shared entrypoint helpers and the service wrapper that tags log lines per service
+COPY --chown=root:root entrypoint-lib.sh /usr/local/lib/entrypoint-lib.sh
+COPY --chown=root:root run-service container-logs /usr/local/bin/
+RUN chmod 755 /usr/local/bin/run-service /usr/local/bin/container-logs
 
 # Default to non-root user
 USER appuser

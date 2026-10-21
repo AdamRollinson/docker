@@ -5,178 +5,276 @@ on:
   push:
     branches:
       - main
+  # Weekly rebuild so Alpine package fixes ship even when nothing in the repo changes
+  schedule:
+    - cron: "23 4 * * 1"
+
+permissions:
+  contents: read
 
 env:
   DOCKER_USER: ${{ vars.DOCKER_USER }}
-  DOCKER_PAT: ${{ secrets.DOCKER_PAT }}
   DOCKER_REGISTRY: adamrollogi
-  BASE_IMAGE: base:latest
+  BASE_IMAGE: base
   PHP_IMAGE: php
   PHP_NGINX_IMAGE: php-nginx
-  PHP_VERSIONS: "8.1 8.2 8.3 8.4"
+  PHP_NGINX_DEV_IMAGE: php-nginx-dev
   PLATFORMS: "linux/amd64,linux/arm64"
+  BUILDX_VERSION: v0.38.1
+  # Images are pushed under this tag first, scanned, and only then promoted to their real tags
+  CANDIDATE_TAG: candidate-${{ github.sha }}
 
 jobs:
+  # Read the pinned PHP releases from alpine/php-versions.txt into a matrix
+  php-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.versions.outputs.matrix }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Read pinned PHP versions
+        id: versions
+        run: |
+          matrix=$(grep -Ev '^[[:space:]]*(#|$)' alpine/php-versions.txt \
+            | jq -Rcn '{include: [inputs | [splits("\\s+")] | map(select(. != "")) | {minor: .[0], patch: .[1]}]}')
+          echo "Matrix: $matrix"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
   # Build Base Image First
   build-base:
     runs-on: ubuntu-latest
     steps:
-      # Checkout Code
       - name: Checkout Repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      # Log in to Docker Hub
       - name: Log in to Docker Hub
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           username: ${{ env.DOCKER_USER }}
-          password: ${{ env.DOCKER_PAT }}
+          password: ${{ secrets.DOCKER_PAT }}
 
-      # Set up Docker Buildx with Docker Build Cloud
       - name: Set up Docker Buildx with Build Cloud
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
         with:
-          version: "lab:latest"
+          version: ${{ env.BUILDX_VERSION }}
           driver: cloud
           endpoint: "${{ env.DOCKER_USER }}/medusa"
           install: true
 
-      # Build and Push Base Image
-      - name: Build Base Image with Build Cloud
+      - name: Build Base Image candidate with Build Cloud
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           platforms: ${{ env.PLATFORMS }}
           context: ./alpine/base
           tags: |
-            ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}
+            ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}:${{ env.CANDIDATE_TAG }}
           outputs: 'type=registry'
           provenance: true
           sbom: true
 
-      # Attach VEX attestation to suppress known false positives
-      - name: Attach VEX attestation to Base Image
-        uses: docker/scout-action@f8c776824083494ab0d56b8105ba2ca85c86e4de # v1.18.2
-        with:
-          command: attestation-add
-          image: ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}
-          file: .vex/openvex.json
-          predicate-type: https://openvex.dev/ns/v0.2.0
-
-      # Trivy vulnerability scan
-      - name: Run Trivy vulnerability scanner on Base Image
+      # Scan before anything is published under a consumable tag
+      - name: Run Trivy vulnerability scanner on Base Image candidate
         uses: aquasecurity/trivy-action@c1824fd6edce30d7ab345a9989de00bbd46ef284 # v0.34.0
         with:
-          image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}
+          image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}:${{ env.CANDIDATE_TAG }}
           format: 'table'
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           ignore-unfixed: true
 
+      - name: Attach VEX attestation to Base Image candidate
+        uses: docker/scout-action@f8c776824083494ab0d56b8105ba2ca85c86e4de # v1.18.2
+        with:
+          command: attestation-add
+          image: ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}:${{ env.CANDIDATE_TAG }}
+          file: .vex/openvex.json
+          predicate-type: https://openvex.dev/ns/v0.2.0
+
+      - name: Promote Base Image
+        run: |
+          docker buildx imagetools create \
+            -t ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}:latest \
+            ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}:${{ env.CANDIDATE_TAG }}
+
+      - name: Remove Base Image candidate tag
+        if: always()
+        continue-on-error: true
+        env:
+          DOCKER_PAT: ${{ secrets.DOCKER_PAT }}
+        run: |
+          token=$(curl -sS -H "Content-Type: application/json" -X POST \
+            -d "{\"username\": \"${DOCKER_USER}\", \"password\": \"${DOCKER_PAT}\"}" \
+            https://hub.docker.com/v2/users/login/ | jq -r .token)
+          curl -sS -o /dev/null -w "delete ${BASE_IMAGE}:${CANDIDATE_TAG} -> %{http_code}\n" -X DELETE \
+            -H "Authorization: JWT ${token}" \
+            "https://hub.docker.com/v2/repositories/${DOCKER_REGISTRY}/${BASE_IMAGE}/tags/${CANDIDATE_TAG}/"
+
   # Build PHP and PHP-NGINX Images after Base Image
   build-php:
-    needs: build-base
+    needs: [php-matrix, build-base]
     runs-on: ubuntu-latest
     strategy:
-      matrix:
-        php_version: [8.1, 8.2, 8.3, 8.4]
+      matrix: ${{ fromJSON(needs.php-matrix.outputs.matrix) }}
     steps:
-      # Checkout Code
       - name: Checkout Repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      # Log in to Docker Hub
       - name: Log in to Docker Hub
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           username: ${{ env.DOCKER_USER }}
-          password: ${{ env.DOCKER_PAT }}
+          password: ${{ secrets.DOCKER_PAT }}
 
-      # Set up Docker Buildx with Docker Build Cloud
       - name: Set up Docker Buildx with Build Cloud
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
         with:
-          version: "lab:latest"
+          version: ${{ env.BUILDX_VERSION }}
           driver: cloud
           endpoint: "${{ env.DOCKER_USER }}/medusa"
           install: true
 
-      # Prepare Clean PHP Version
-      - name: Prepare Clean PHP Version for PHP-NGINX Build
-        run: echo "PHP_VERSION=$(echo ${{ matrix.php_version }} | tr -d '.')" >> $GITHUB_ENV
+      - name: Prepare Clean PHP Version
+        run: echo "PHP_VERSION=$(echo ${{ matrix.minor }} | tr -d '.')" >> $GITHUB_ENV
 
-      # Build and Push PHP Image
-      - name: Build PHP Image (${{ matrix.php_version }}) with Build Cloud
+      # ---- PHP image ----------------------------------------------------------
+      - name: Build PHP Image (${{ matrix.minor }}) candidate with Build Cloud
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           platforms: ${{ env.PLATFORMS }}
           context: ./alpine/php
+          pull: true
           tags: |
-            ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ matrix.php_version }}
+            ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
           build-args: |
             PHP_VERSION=${{ env.PHP_VERSION }}
+            PHP_PATCH_VERSION=${{ matrix.patch }}
           outputs: 'type=registry'
           provenance: true
           sbom: true
 
-      # Attach VEX attestation to suppress known false positives
-      - name: Attach VEX attestation to PHP Image (${{ matrix.php_version }})
-        uses: docker/scout-action@f8c776824083494ab0d56b8105ba2ca85c86e4de # v1.18.2
-        with:
-          command: attestation-add
-          image: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ matrix.php_version }}
-          file: .vex/openvex.json
-          predicate-type: https://openvex.dev/ns/v0.2.0
-
-      # Trivy vulnerability scan for PHP Image
-      - name: Run Trivy vulnerability scanner on PHP Image (${{ matrix.php_version }})
+      - name: Run Trivy vulnerability scanner on PHP Image (${{ matrix.minor }}) candidate
         uses: aquasecurity/trivy-action@c1824fd6edce30d7ab345a9989de00bbd46ef284 # v0.34.0
         with:
-          image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ matrix.php_version }}
+          image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
           format: 'table'
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           ignore-unfixed: true
 
-      # Prepare Clean PHP Version
-      - name: Prepare Clean PHP Version for PHP-NGINX Build
-        run: echo "PHP_VERSION=$(echo ${{ matrix.php_version }} | tr -d '.')" >> $GITHUB_ENV
+      - name: Attach VEX attestation to PHP Image (${{ matrix.minor }}) candidate
+        uses: docker/scout-action@f8c776824083494ab0d56b8105ba2ca85c86e4de # v1.18.2
+        with:
+          command: attestation-add
+          image: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
+          file: .vex/openvex.json
+          predicate-type: https://openvex.dev/ns/v0.2.0
 
-      # Build and Push PHP-NGINX Image
-      - name: Build PHP-NGINX Image (${{ matrix.php_version }}) with Build Cloud
+      - name: Promote PHP Image (${{ matrix.minor }})
+        run: |
+          docker buildx imagetools create \
+            -t ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ matrix.minor }} \
+            -t ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ matrix.patch }} \
+            ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
+
+      # ---- PHP-NGINX image (built FROM the promoted php tag) -------------------
+      - name: Build PHP-NGINX Image (${{ matrix.minor }}) candidate with Build Cloud
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           platforms: ${{ env.PLATFORMS }}
           context: ./alpine/php-nginx
+          pull: true
           tags: |
-            ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ matrix.php_version }}
+            ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
           build-args: |
-            PHP_IMAGE_TAG=${{ matrix.php_version }}
+            PHP_IMAGE_TAG=${{ matrix.minor }}
             PHP_VERSION=${{ env.PHP_VERSION }}
           outputs: 'type=registry'
           provenance: true
           sbom: true
 
-      # Attach VEX attestation to suppress known false positives
-      - name: Attach VEX attestation to PHP-NGINX Image (${{ matrix.php_version }})
-        uses: docker/scout-action@f8c776824083494ab0d56b8105ba2ca85c86e4de # v1.18.2
-        with:
-          command: attestation-add
-          image: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ matrix.php_version }}
-          file: .vex/openvex.json
-          predicate-type: https://openvex.dev/ns/v0.2.0
-
-      # Trivy vulnerability scan for PHP-NGINX Image
-      - name: Run Trivy vulnerability scanner on PHP-NGINX Image (${{ matrix.php_version }})
+      - name: Run Trivy vulnerability scanner on PHP-NGINX Image (${{ matrix.minor }}) candidate
         uses: aquasecurity/trivy-action@c1824fd6edce30d7ab345a9989de00bbd46ef284 # v0.34.0
         with:
-          image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ matrix.php_version }}
+          image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
           format: 'table'
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           ignore-unfixed: true
 
-      # Verify Build Results
+      - name: Attach VEX attestation to PHP-NGINX Image (${{ matrix.minor }}) candidate
+        uses: docker/scout-action@f8c776824083494ab0d56b8105ba2ca85c86e4de # v1.18.2
+        with:
+          command: attestation-add
+          image: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
+          file: .vex/openvex.json
+          predicate-type: https://openvex.dev/ns/v0.2.0
+
+      - name: Promote PHP-NGINX Image (${{ matrix.minor }})
+        run: |
+          docker buildx imagetools create \
+            -t ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ matrix.minor }} \
+            -t ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ matrix.patch }} \
+            ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
+
+      # ---- PHP-NGINX-DEV image (built FROM the promoted php-nginx tag) ---------
+      - name: Build PHP-NGINX-DEV Image (${{ matrix.minor }}) candidate with Build Cloud
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          platforms: ${{ env.PLATFORMS }}
+          context: ./alpine/php-nginx-dev
+          pull: true
+          tags: |
+            ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
+          build-args: |
+            PHP_IMAGE_TAG=${{ matrix.minor }}
+            PHP_VERSION=${{ env.PHP_VERSION }}
+          outputs: 'type=registry'
+          provenance: true
+          sbom: true
+
+      - name: Run Trivy vulnerability scanner on PHP-NGINX-DEV Image (${{ matrix.minor }}) candidate
+        uses: aquasecurity/trivy-action@c1824fd6edce30d7ab345a9989de00bbd46ef284 # v0.34.0
+        with:
+          image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
+
+      - name: Attach VEX attestation to PHP-NGINX-DEV Image (${{ matrix.minor }}) candidate
+        uses: docker/scout-action@f8c776824083494ab0d56b8105ba2ca85c86e4de # v1.18.2
+        with:
+          command: attestation-add
+          image: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
+          file: .vex/openvex.json
+          predicate-type: https://openvex.dev/ns/v0.2.0
+
+      - name: Promote PHP-NGINX-DEV Image (${{ matrix.minor }})
+        run: |
+          docker buildx imagetools create \
+            -t ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ matrix.minor }} \
+            -t ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ matrix.patch }} \
+            ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
+
       - name: Verify Built Images
         run: |
-          docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ matrix.php_version }}
-          docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ matrix.php_version }}
+          docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ matrix.minor }}
+          docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ matrix.minor }}
+          docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ matrix.minor }}
+
+      - name: Remove candidate tags
+        if: always()
+        continue-on-error: true
+        env:
+          DOCKER_PAT: ${{ secrets.DOCKER_PAT }}
+        run: |
+          token=$(curl -sS -H "Content-Type: application/json" -X POST \
+            -d "{\"username\": \"${DOCKER_USER}\", \"password\": \"${DOCKER_PAT}\"}" \
+            https://hub.docker.com/v2/users/login/ | jq -r .token)
+          for repo in "${PHP_IMAGE}" "${PHP_NGINX_IMAGE}" "${PHP_NGINX_DEV_IMAGE}"; do
+            curl -sS -o /dev/null -w "delete ${repo}:${CANDIDATE_TAG}-${{ matrix.minor }} -> %{http_code}\n" -X DELETE \
+              -H "Authorization: JWT ${token}" \
+              "https://hub.docker.com/v2/repositories/${DOCKER_REGISTRY}/${repo}/tags/${CANDIDATE_TAG}-${{ matrix.minor }}/"
+          done
