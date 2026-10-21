@@ -2,6 +2,8 @@
 
 Multi-architecture (amd64/arm64) PHP container images built on Alpine Linux 3.24 and published to Docker Hub under `adamrollogi/`.
 
+Full documentation: the `docs/` site (Nuxt, deployed to Cloudflare Pages). This README is the short version.
+
 ## Images
 
 | Image | Description |

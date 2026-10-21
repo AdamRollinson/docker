@@ -107,7 +107,7 @@ Supervisor manages all long-running processes inside containers:
 - Needs `contents: write` and `actions: write`, which the workflow requests itself
 
 ### Image build (`.github/workflows/docker-build.yml`)
-- **Triggers**: push to `main`, manual `workflow_dispatch`, weekly cron (so Alpine fixes ship without a code change)
+- **Triggers**: push to `main` (ignoring `docs/**`, Markdown, `LICENSE`, `docs-ci.yml` and `dependabot.yml`, so documentation changes never rebuild images), manual `workflow_dispatch`, weekly cron (so Alpine fixes ship without a code change)
 - **Scan before publish**: every image is pushed as `:candidate-<sha>[-<minor>]`, Trivy-scanned and VEX-attested, then promoted to its real tags with `docker buildx imagetools create`. Candidate tags are deleted via the Docker Hub API afterwards (best effort)
 - `DOCKER_PAT` is only exposed to the login and candidate-cleanup steps, never at workflow scope
 - Buildx is pinned to a mainline release via `BUILDX_VERSION`. Dependabot covers both GitHub Actions and the `alpine/base` Docker digest
@@ -118,6 +118,10 @@ Supervisor manages all long-running processes inside containers:
 - VEX attestations via `docker/scout-action` (attestation-add command)
 - Trivy vulnerability scanning (fails on CRITICAL/HIGH)
 - **Required secrets/vars**: `DOCKER_USER` (variable), `DOCKER_PAT` (secret, needs read/write/delete scope so candidate tags can be removed)
+
+## Documentation site (`docs/`)
+
+A Nuxt 4 site built from the Nuxt UI docs template with `@nuxt/ui`, `@nuxt/content`, `nuxt-og-image` and `nuxt-llms`. Package manager is **pnpm** (lockfile present); run commands from `docs/`: `pnpm dev`, `pnpm check` (lint + typecheck), `pnpm generate` (static output in `.output/public`). Content is Markdown under `docs/content/` with numeric prefixes for ordering and `.navigation.yml` per section; the landing page is `content/index.md`. Site URL comes from `NUXT_PUBLIC_SITE_URL`. Deployment is Cloudflare Pages Git integration (root directory `docs`, build `pnpm generate`, output `.output/public`); `.github/workflows/docs-ci.yml` only lints, typechecks and generates on changes under `docs/`. When image behaviour or variables change, update the corresponding page under `docs/content/` alongside `README.md` and `ENV.md`.
 
 ## Key Files
 
@@ -144,4 +148,5 @@ Supervisor manages all long-running processes inside containers:
 | `alpine/php-nginx-dev/Dockerfile` | Xdebug development image |
 | `alpine/php-nginx-dev/php-nginx-dev-entrypoint.sh` | Renders Xdebug ini and no-cache snippet, then chains to php-nginx entrypoint |
 | `ENV.md` | Complete environment variable reference |
+| `docs/` | Nuxt documentation site deployed to Cloudflare Pages |
 | `SECURITY.md` | CVE details and VEX attestation documentation |

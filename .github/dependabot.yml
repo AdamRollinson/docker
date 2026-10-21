@@ -10,3 +10,16 @@ updates:
     directory: /alpine/base
     schedule:
       interval: weekly
+
+  # Documentation site dependencies
+  - package-ecosystem: npm
+    directory: /docs
+    schedule:
+      interval: weekly
+    groups:
+      nuxt:
+        patterns:
+          - "nuxt"
+          - "@nuxt/*"
+          - "@nuxtjs/*"
+          - "nuxt-*"
