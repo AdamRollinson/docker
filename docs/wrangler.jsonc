@@ -1,0 +1,12 @@
+{
+  // Deploys the statically generated site to Cloudflare Workers as static assets only.
+  // There is no Worker script: Cloudflare serves .output/public directly.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "docker-docs",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./.output/public",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  }
+}

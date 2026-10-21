@@ -41,9 +41,12 @@ export default defineNuxtConfig({
 
   compatibilityDate: '2026-06-30',
 
-  // Static output for Cloudflare Pages. autoSubfolderIndex=false matches Pages' route handling
-  // (it serves /about.html for /about and redirects /about/index.html itself).
+  // Fully static output, deployed to Cloudflare Workers as static assets (see wrangler.jsonc).
+  // The preset is pinned so Cloudflare's build environment cannot auto-select the
+  // cloudflare-module (server) preset, which would need a Worker entry point we do not build.
+  // autoSubfolderIndex=false matches Cloudflare's asset routing (/about.html served for /about).
   nitro: {
+    preset: 'static',
     prerender: {
       autoSubfolderIndex: false
     }
