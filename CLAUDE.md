@@ -121,7 +121,7 @@ Supervisor manages all long-running processes inside containers:
 
 ## Documentation site (`docs/`)
 
-A Nuxt 4 site built from the Nuxt UI docs template with `@nuxt/ui`, `@nuxt/content`, `nuxt-og-image` and `nuxt-llms`. Package manager is **pnpm** (lockfile present); run commands from `docs/`: `pnpm dev`, `pnpm check` (lint + typecheck), `pnpm generate` (static output in `.output/public`). Content is Markdown under `docs/content/` with numeric prefixes for ordering and `.navigation.yml` per section; the landing page is `content/index.md`. Site URL comes from `NUXT_PUBLIC_SITE_URL`. Deployment is Cloudflare Pages Git integration (root directory `docs`, build `pnpm generate`, output `.output/public`); `.github/workflows/docs-ci.yml` only lints, typechecks and generates on changes under `docs/`. When image behaviour or variables change, update the corresponding page under `docs/content/` alongside `README.md` and `ENV.md`.
+A Nuxt 4 site built from the Nuxt UI docs template with `@nuxt/ui`, `@nuxt/content`, `nuxt-og-image` and `nuxt-llms`. Package manager is **pnpm** (lockfile present); run commands from `docs/`: `pnpm dev`, `pnpm check` (lint + typecheck), `pnpm generate` (static output in `.output/public`). Content is Markdown under `docs/content/` with numeric prefixes for ordering and `.navigation.yml` per section; the landing page is `content/index.md`. Site URL comes from `NUXT_PUBLIC_SITE_URL`. Deployment is a Cloudflare Workers static-assets Worker built by Workers Builds from the repo (root directory `docs`, build `pnpm generate`, deploy `npx wrangler deploy`, config in `docs/wrangler.jsonc` with no Worker script). `nitro.preset` is pinned to `static` because Cloudflare's build environment otherwise auto-selects `cloudflare-module` and the deploy fails looking for a server entry point. `.github/workflows/docs-ci.yml` only lints, typechecks and generates on changes under `docs/`. When image behaviour or variables change, update the corresponding page under `docs/content/` alongside `README.md` and `ENV.md`.
 
 ## Key Files
 
@@ -148,5 +148,5 @@ A Nuxt 4 site built from the Nuxt UI docs template with `@nuxt/ui`, `@nuxt/conte
 | `alpine/php-nginx-dev/Dockerfile` | Xdebug development image |
 | `alpine/php-nginx-dev/php-nginx-dev-entrypoint.sh` | Renders Xdebug ini and no-cache snippet, then chains to php-nginx entrypoint |
 | `ENV.md` | Complete environment variable reference |
-| `docs/` | Nuxt documentation site deployed to Cloudflare Pages |
+| `docs/` | Nuxt documentation site deployed to Cloudflare Workers as static assets |
 | `SECURITY.md` | CVE details and VEX attestation documentation |

@@ -10,7 +10,8 @@
     "postinstall": "nuxt prepare",
     "lint": "eslint .",
     "typecheck": "nuxt typecheck",
-    "check": "pnpm run lint && pnpm run typecheck"
+    "check": "pnpm run lint && pnpm run typecheck",
+    "deploy": "wrangler deploy"
   },
   "dependencies": {
     "@iconify-json/lucide": "^1.2.145",
@@ -35,7 +36,8 @@
     "eslint": "^10.13.0",
     "eslint-plugin-better-tailwindcss": "^4.9.1",
     "typescript": "^6.0.3",
-    "vue-tsc": "^3.3.13"
+    "vue-tsc": "^3.3.13",
+    "wrangler": "^4.151.3"
   },
   "packageManager": "pnpm@12.14.0"
 }

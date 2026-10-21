@@ -1,7 +1,7 @@
 name: Docs CI
 
 # Lints, typechecks and statically generates the documentation site in docs/.
-# Deployment is handled by Cloudflare Pages' Git integration, not by this workflow.
+# Deployment is handled by Cloudflare Workers Builds from the repository, not by this workflow.
 
 on:
   push:
