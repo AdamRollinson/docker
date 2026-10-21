@@ -29,6 +29,9 @@ if [ -n "$OPCACHE_ERROR_LOG" ]; then
     chmod 666 "$OPCACHE_ERROR_LOG" 2>/dev/null || true
 fi
 
+# One-off setup command (composer install, migrations) before anything else runs
+run_app_install
+
 # "cron" runs the configured cron jobs (CRON_COMMAND or CRONTAB_FILE) as the only process,
 # for a dedicated scheduler container. Everything else is executed as given.
 if [ "${1:-}" = "cron" ]; then

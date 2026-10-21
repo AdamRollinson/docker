@@ -271,6 +271,9 @@ fi
 # Create log directories (best-effort for non-root; needed when /var/log is a tmpfs)
 mkdir -p /var/log/nginx "/var/log/php${PHP_VERSION}" /var/log/php-fpm /var/lib/nginx/tmp /var/lib/nginx/logs 2>/dev/null || true
 
+# One-off setup command (composer install, migrations) before the services start
+run_app_install
+
 # ---------------------------------------------------------------------------
 # Process supervision
 # ---------------------------------------------------------------------------

@@ -96,3 +96,20 @@ render_msmtp() {
     fi
     log "INFO: Mail relay configured: ${SMTP_HOST}:${SMTP_PORT} (tls=${SMTP_TLS}, starttls=${SMTP_TLS_STARTTLS}, auth=${SMTP_AUTH}, from=${SMTP_FROM})."
 }
+
+# Run the one-off APP_INSTALL command (composer install, migrations, cache warmup) before the
+# main command or the services start. Runs in APP_INSTALL_DIR (default: the working directory)
+# with output tagged [install]. A non-zero exit stops the container with that status, so a
+# failed install never results in a serving container with half-installed code.
+run_app_install() {
+    [ -n "${APP_INSTALL:-}" ] || return 0
+    local dir="${APP_INSTALL_DIR:-$PWD}" status
+    log "INFO: Running APP_INSTALL in ${dir}: ${APP_INSTALL}"
+    if (cd "$dir" && run-service install sh -c "${APP_INSTALL}"); then
+        log "INFO: APP_INSTALL finished."
+    else
+        status=$?
+        log "ERROR: APP_INSTALL exited with status ${status}; not starting."
+        exit "$status"
+    fi
+}

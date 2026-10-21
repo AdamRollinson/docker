@@ -74,6 +74,22 @@ ENV CLI_COMMAND="" \
     CLI_RESTART_DELAY=2 \
     CLI_MAX_RESTARTS=0
 
+# Composer: home and cache under /tmp so it works for any UID (including --user) and on a
+# read-only root filesystem; non-interactive and quiet about funding; no superuser warning in
+# root mode; no memory limit for dependency resolution. Mount the cache in your own builds with
+# RUN --mount=type=cache,target=/tmp/composer/cache composer install
+ENV COMPOSER_HOME=/tmp/composer \
+    COMPOSER_CACHE_DIR=/tmp/composer/cache \
+    COMPOSER_ALLOW_SUPERUSER=1 \
+    COMPOSER_NO_INTERACTION=1 \
+    COMPOSER_FUND=0 \
+    COMPOSER_MEMORY_LIMIT=-1 \
+    COMPOSER_PROCESS_TIMEOUT=600
+
+# Optional one-off command run before the main command or the services start (see entrypoint-lib)
+ENV APP_INSTALL="" \
+    APP_INSTALL_DIR=/app
+
 # Install PHP with scoped edge repos (prevents edge repos leaking to downstream images).
 # Every PHP package carries the same release pin. Alpine's extension packages depend on
 # php${PHP_VERSION}-common WITHOUT a version constraint, so when edge rolls to a new release

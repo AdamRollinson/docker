@@ -104,6 +104,16 @@ test_php() {
     mismatched=$(docker run --rm --entrypoint sh "$img" -c 'apk list -I 2>/dev/null | awk "{print \$1}" | grep "^php" | grep -v -- "-pecl-" | grep -v -- "-$(php -r "echo PHP_VERSION;" | tr "A-Z" "a-z" | sed -E "s/([0-9])(rc|beta|alpha)/\1_\2/")-r" || true')
     [ -z "$mismatched" ] && pass "every php package at the same release" || fail "mismatched php packages" "$mismatched"
     docker run --rm "$img" composer --version >/dev/null 2>&1 && pass "composer runs" || fail "composer does not run"
+    docker run --rm --user 4321:4321 "$img" composer --version >/dev/null 2>&1 && pass "composer runs as an arbitrary --user (COMPOSER_HOME under /tmp)" || fail "composer fails for --user 4321" "$(docker run --rm --user 4321:4321 "$img" composer --version 2>&1 | tail -3)"
+    docker run --rm --user 0 "$img" composer --version 2>&1 | grep -qi "superuser" && fail "composer warns about running as root in root mode" || pass "composer silent about root in root mode"
+    local inst
+    inst=$(docker run --rm -e APP_INSTALL='echo prepared in $(pwd)' "$img" php -r 'echo "main";' 2>&1)
+    echo "$inst" | grep -q '^\[install\] prepared in /app$' && echo "$inst" | grep -q 'main$' && pass "APP_INSTALL runs in /app before the command, tagged [install]" || fail "APP_INSTALL output unexpected" "$inst"
+    inst=$(docker run --rm -e APP_INSTALL='echo prepared in $(pwd)' -e APP_INSTALL_DIR=/tmp "$img" php -r 'echo "main";' 2>&1)
+    echo "$inst" | grep -q '^\[install\] prepared in /tmp$' && pass "APP_INSTALL_DIR changes the install directory" || fail "APP_INSTALL_DIR ignored" "$inst"
+    local st
+    st=$(docker run --rm -e APP_INSTALL='echo broken >&2; exit 7' "$img" php -r 'echo "main";' 2>/dev/null; echo "exit=$?")
+    [ "$st" = "exit=7" ] && pass "failed APP_INSTALL stops the container with its exit status and runs nothing else" || fail "failed APP_INSTALL did not stop the container ('$st')"
     local ml
     ml=$(docker run --rm -e "php.memory_limit=321M" "$img" php -r 'echo ini_get("memory_limit");' 2>/dev/null)
     [ "$ml" = "321M" ] && pass "php.* override applies (memory_limit=321M)" || fail "php.* override ignored (got '$ml')"
@@ -224,6 +234,18 @@ test_php_nginx() {
     curl -sf "http://127.0.0.1:${port}/health" >/dev/null && pass "root mode healthy on port 80" || fail "root mode failed" "$(docker logs "$cid" 2>&1 | tail -5)"
     docker exec "$cid" sh -c 'ps -o user,args | grep -E "nginx: worker" | grep -v grep | grep -q "^nginx"' && pass "nginx workers dropped to nginx user" || fail "nginx workers not running as nginx"
     docker rm -f "$cid" >/dev/null
+
+    # APP_INSTALL runs in the document root before the services start, and a failure stops the container
+    cid=$(start_web "$port" -e APP_INSTALL='echo web prepared in $(pwd)' -v "$WORK/www:/var/www/html:ro" "$img") || fail "container with APP_INSTALL did not start"
+    docker logs "$cid" 2>&1 | grep -q '^\[install\] web prepared in /var/www/html$' && pass "APP_INSTALL runs in /var/www/html before the services" || fail "APP_INSTALL output missing" "$(docker logs "$cid" 2>&1 | head -5)"
+    docker logs "$cid" 2>&1 | awk '/^\[install\]/ {i=NR} /Starting php-fpm/ {s=NR} END {exit !(i && s && i < s)}' && pass "APP_INSTALL finished before php-fpm and nginx were started" || fail "services started before APP_INSTALL finished" "$(docker logs "$cid" 2>&1 | head -8)"
+    docker rm -f "$cid" >/dev/null
+    cid=$(docker run -d -e NGINX_PORT=8080 -e APP_INSTALL='exit 5' "$img"); CONTAINERS+=("$cid")
+    for _ in $(seq 1 20); do [ "$(docker inspect -f '{{.State.Status}}' "$cid")" = "exited" ] && break; sleep 0.5; done
+    st="$(docker inspect -f '{{.State.Status}}:{{.State.ExitCode}}' "$cid")"
+    [ "$st" = "exited:5" ] && pass "failed APP_INSTALL stops php-nginx with its exit status" || fail "php-nginx kept running after a failed APP_INSTALL (state $st)" "$(docker logs "$cid" 2>&1 | tail -4)"
+    docker rm -f "$cid" >/dev/null
+    port=$(free_port)
 
     # metrics listener on its own port, absent from the app port
     port=$(free_port); local mport; mport=$(free_port)

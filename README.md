@@ -117,6 +117,25 @@ docker run --rm -d -v $(pwd):/app -w /app \
 
 `CLI_RESTART_DELAY` (default 2 seconds) spaces the restarts and `CLI_MAX_RESTARTS` (default 0, unlimited) turns a crash loop into a container exit with the worker's status. An explicit command always wins over `CLI_COMMAND`.
 
+### Startup commands
+
+`APP_INSTALL` runs once before the main command (php) or before the services start (php-nginx), in the document root (`APP_INSTALL_DIR`, default `/app` for php and `/var/www/html` for php-nginx), with output tagged `[install]`. A non-zero exit stops the container with that status, so a failed install never becomes a serving container with half-installed code:
+
+```bash
+docker run --rm -d -p 8080:8080 -e NGINX_PORT=8080 \
+  -e APP_INSTALL="composer install --no-dev --optimize-autoloader && php artisan migrate --force" \
+  -v $(pwd):/var/www/html \
+  adamrollogi/php-nginx:8.4
+```
+
+Composer is pre-configured for containers: `COMPOSER_HOME` and the cache live under `/tmp/composer` so it works for any `--user` and on a read-only root filesystem, it never prompts (`COMPOSER_NO_INTERACTION=1`), skips the funding notice, runs without a memory limit and does not warn in root mode. In your own `Dockerfile`, keep the cache between builds with:
+
+```dockerfile
+FROM adamrollogi/php:8.4
+COPY --chown=appuser composer.json composer.lock ./
+RUN --mount=type=cache,target=/tmp/composer/cache,uid=1000 composer install --no-dev --no-scripts
+```
+
 ### Cron
 
 Cron runs as the unprivileged user through [supercronic](https://github.com/aptible/supercronic), with job output in the container log tagged `[cron]`. Either set a single job:

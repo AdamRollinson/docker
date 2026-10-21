@@ -20,6 +20,13 @@
 - **`CLI_RESTART_DELAY`**: Seconds to wait before restarting the worker. Default `2`.
 - **`CLI_MAX_RESTARTS`**: Give up after this many restarts and exit with the worker's status. Default `0` (unlimited).
 
+### Startup command
+- **`APP_INSTALL`**: Command run once at startup, before the main command (php image) or before php-fpm and nginx start (php-nginx). Output tagged `[install]`; a non-zero exit stops the container with that status.
+- **`APP_INSTALL_DIR`**: Directory the command runs in. Default `/app` (php) or `/var/www/html` (php-nginx).
+
+### Composer
+Standard Composer variables with container-friendly defaults: **`COMPOSER_HOME`** `/tmp/composer`, **`COMPOSER_CACHE_DIR`** `/tmp/composer/cache`, **`COMPOSER_ALLOW_SUPERUSER`** `1`, **`COMPOSER_NO_INTERACTION`** `1`, **`COMPOSER_FUND`** `0`, **`COMPOSER_MEMORY_LIMIT`** `-1`, **`COMPOSER_PROCESS_TIMEOUT`** `600`. Override any of them as usual.
+
 ### Cron
 - **`CRON_SCHEDULE`**: Schedule for the single job defined by `CRON_COMMAND`. Default `* * * * *` (every minute). Standard five fields, or seven with leading seconds and trailing year.
 - **`CRON_COMMAND`**: Command to run on `CRON_SCHEDULE`. When set, supercronic is started alongside the web services (php-nginx) or by the `cron` command (php image).

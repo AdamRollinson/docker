@@ -21,6 +21,7 @@ ENV NGINX_PORT=80 \
     NGINX_METRICS_PORT="" \
     NGINX_METRICS_ALLOW=all \
     NGINX_DOCUMENT_ROOT=/var/www/html \
+    APP_INSTALL_DIR=/var/www/html \
     NGINX_SSL_ENABLED=false \
     NGINX_SSL_PORT=443 \
     NGINX_SSL_CERTIFICATE=/etc/nginx/ssl/cert.pem \
