@@ -40,5 +40,32 @@ if [ "${1:-}" = "cron" ]; then
     exec run-service cron supercronic -passthrough-logs -quiet -no-reap "$crontab"
 fi
 
+# Worker mode: CLI_COMMAND is run and restarted whenever it exits, so a queue worker or
+# scheduler loop that crashes or exits after its max-jobs limit comes straight back without
+# the container restarting. Active when CLI_COMMAND is set and the image default command
+# (php -v) or the explicit "worker" command is used; an explicit command always wins.
+if [ -n "${CLI_COMMAND:-}" ] && { [ "${1:-}" = "worker" ] || [ "$*" = "php -v" ]; }; then
+    run_worker() {
+        local restarts=0 status
+        log "INFO: Worker mode: running '${CLI_COMMAND}' (restart delay ${CLI_RESTART_DELAY:-2}s, max restarts ${CLI_MAX_RESTARTS:-0}; 0 = unlimited)."
+        trap 'kill -TERM "$child" 2>/dev/null; wait "$child" 2>/dev/null; exit 143' TERM INT
+        while true; do
+            # the command's own output is tagged [worker]; entrypoint messages keep their tag
+            run-service worker sh -c "${CLI_COMMAND}" &
+            child=$!
+            # capture the status without tripping set -e
+            if wait "$child"; then status=0; else status=$?; fi
+            restarts=$((restarts + 1))
+            if [ "${CLI_MAX_RESTARTS:-0}" -gt 0 ] && [ "$restarts" -gt "${CLI_MAX_RESTARTS}" ]; then
+                log "ERROR: Worker exited with status ${status} and the restart limit (${CLI_MAX_RESTARTS}) is reached; giving up."
+                exit "$status"
+            fi
+            log "WARNING: Worker exited with status ${status}; restarting in ${CLI_RESTART_DELAY:-2}s (restart ${restarts})."
+            sleep "${CLI_RESTART_DELAY:-2}"
+        done
+    }
+    run_worker
+fi
+
 # Run the original command
 exec "$@"

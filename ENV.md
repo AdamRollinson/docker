@@ -8,6 +8,11 @@
 - **`LOG_TAG`**: `true` (default) adds the `[service]` prefixes in text mode; `false` leaves lines untouched. Ignored in json and file modes.
 - Services are launched through `/usr/local/bin/run-service <name> <command>`, which implements the tagging; `container-logs [-f] [service|all]` tails the per-service files in file mode.
 
+### Worker mode (php image)
+- **`CLI_COMMAND`**: Command to run as a long-lived worker. Used when the image starts with its default command or the `worker` command; restarted whenever it exits. Output is tagged `[worker]`.
+- **`CLI_RESTART_DELAY`**: Seconds to wait before restarting the worker. Default `2`.
+- **`CLI_MAX_RESTARTS`**: Give up after this many restarts and exit with the worker's status. Default `0` (unlimited).
+
 ### Cron
 - **`CRON_SCHEDULE`**: Schedule for the single job defined by `CRON_COMMAND`. Default `* * * * *` (every minute). Standard five fields, or seven with leading seconds and trailing year.
 - **`CRON_COMMAND`**: Command to run on `CRON_SCHEDULE`. When set, supercronic is started alongside the web services (php-nginx) or by the `cron` command (php image).

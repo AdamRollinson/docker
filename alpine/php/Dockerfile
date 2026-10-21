@@ -53,6 +53,12 @@ ENV PHP_EXPOSE_PHP=Off \
     PHP_MAX_INPUT_VARS=1000 \
     PHP_SENDMAIL_PATH=""
 
+# Worker mode: when CLI_COMMAND is set and the image is started with its default command,
+# the entrypoint runs CLI_COMMAND and restarts it whenever it exits (see php-entrypoint.sh)
+ENV CLI_COMMAND="" \
+    CLI_RESTART_DELAY=2 \
+    CLI_MAX_RESTARTS=0
+
 # Install PHP with scoped edge repos (prevents edge repos leaking to downstream images).
 # Every PHP package carries the same release pin. Alpine's extension packages depend on
 # php${PHP_VERSION}-common WITHOUT a version constraint, so when edge rolls to a new release

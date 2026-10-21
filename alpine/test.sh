@@ -117,6 +117,28 @@ test_php() {
     sleep 4
     docker logs "$cid" 2>&1 | grep -q '^\[cron\] cli-cron-tick' && pass "cron command runs a scheduler container" || fail "cron command did not run jobs" "$(docker logs "$cid" 2>&1 | tail -5)"
     docker rm -f "$cid" >/dev/null
+    # worker mode restarts the command when it exits
+    cid=$(docker run -d --rm -e CLI_COMMAND='echo worker-run; exit 1' -e CLI_RESTART_DELAY=1 "$img")
+    CONTAINERS+=("$cid")
+    sleep 4
+    local runs
+    runs=$(docker logs "$cid" 2>&1 | grep -c '^\[worker\] worker-run' || true)
+    [ "$runs" -ge 2 ] && pass "worker mode restarts the command ($runs runs in 4s)" || fail "worker mode did not restart" "$(docker logs "$cid" 2>&1 | tail -5)"
+    docker rm -f "$cid" >/dev/null
+    cid=$(docker run -d -e CLI_COMMAND='exit 3' -e CLI_RESTART_DELAY=0 -e CLI_MAX_RESTARTS=2 "$img")
+    CONTAINERS+=("$cid")
+    local st=""
+    for _ in $(seq 1 20); do
+        st=$(docker inspect "$cid" --format '{{.State.Status}}:{{.State.ExitCode}}')
+        case "$st" in exited:*) break ;; esac
+        sleep 0.5
+    done
+    [ "$st" = "exited:3" ] && pass "worker mode gives up after CLI_MAX_RESTARTS and propagates the exit status" || fail "worker did not stop after the restart limit (state $st)" "$(docker logs "$cid" 2>&1 | tail -4)"
+    docker logs "$cid" 2>&1 | grep -q '^\[worker\] \[entrypoint\]' && fail "entrypoint messages double-tagged in worker mode" || pass "worker and entrypoint streams tagged separately"
+    docker rm -f "$cid" >/dev/null 2>&1 || true
+    local out
+    out=$(docker run --rm -e CLI_COMMAND='echo should-not-run' "$img" php -r 'echo "explicit";' 2>/dev/null)
+    [ "$out" = "explicit" ] && pass "an explicit command overrides CLI_COMMAND" || fail "CLI_COMMAND hijacked an explicit command: '$out'"
 }
 
 test_php_nginx() {

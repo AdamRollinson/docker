@@ -78,6 +78,18 @@ All images default to running as `appuser` (UID 1000). When running as non-root:
 
 Use `--user root` when you need privileged ports.
 
+### Queue workers and other long-running commands
+
+Set `CLI_COMMAND` on the `php` image and the entrypoint runs it, restarting it whenever it exits, with output tagged `[worker]`:
+
+```bash
+docker run --rm -d -v $(pwd):/app -w /app \
+  -e CLI_COMMAND="php artisan queue:work --max-jobs=500" \
+  adamrollogi/php:8.4
+```
+
+`CLI_RESTART_DELAY` (default 2 seconds) spaces the restarts and `CLI_MAX_RESTARTS` (default 0, unlimited) turns a crash loop into a container exit with the worker's status. An explicit command always wins over `CLI_COMMAND`.
+
 ### Cron
 
 Cron runs as the unprivileged user through [supercronic](https://github.com/aptible/supercronic), with job output in the container log tagged `[cron]`. Either set a single job:
