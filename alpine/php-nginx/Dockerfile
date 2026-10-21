@@ -1,6 +1,10 @@
 ARG PHP_IMAGE_TAG=8.3
+# Full reference of the php image to build on. Defaults to the tag above; CI passes the
+# per-architecture digest it just built (adamrollogi/php@sha256:...) so each native runner
+# chains php -> php-nginx -> php-nginx-dev without waiting for the manifest list.
+ARG PHP_IMAGE=adamrollogi/php:${PHP_IMAGE_TAG}
 
-FROM adamrollogi/php:${PHP_IMAGE_TAG}
+FROM ${PHP_IMAGE}
 
 # Switch to root for package installation
 USER root

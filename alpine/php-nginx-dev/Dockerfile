@@ -1,6 +1,8 @@
 ARG PHP_IMAGE_TAG=8.4
+# Full reference of the php-nginx image to build on (see php-nginx/Dockerfile)
+ARG PHP_IMAGE=adamrollogi/php-nginx:${PHP_IMAGE_TAG}
 
-FROM adamrollogi/php-nginx:${PHP_IMAGE_TAG}
+FROM ${PHP_IMAGE}
 
 # Switch to root for package installation
 USER root

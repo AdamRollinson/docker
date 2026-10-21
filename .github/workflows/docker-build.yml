@@ -30,17 +30,23 @@ env:
   PHP_IMAGE: php
   PHP_NGINX_IMAGE: php-nginx
   PHP_NGINX_DEV_IMAGE: php-nginx-dev
-  PLATFORMS: "linux/amd64,linux/arm64"
   BUILDX_VERSION: v0.38.1
   # Images are pushed under this tag first, scanned, and only then promoted to their real tags
   CANDIDATE_TAG: candidate-${{ github.sha }}
 
+# Each architecture is built natively (ubuntu-24.04 for amd64, ubuntu-24.04-arm for arm64), no
+# QEMU. A build job pushes its single-platform image by digest, scans and smoke tests it on that
+# architecture, and hands the digest to a publish job through an artifact. The publish job joins
+# the two digests into one manifest list under the candidate tag, attaches the VEX statement,
+# promotes it to the real tags, signs it and removes the candidate tag.
 jobs:
-  # Read the pinned PHP releases from alpine/php-versions.txt into a matrix
+  # Read the pinned PHP releases from alpine/php-versions.txt into two matrices: one entry per
+  # minor (publish jobs) and one per minor and architecture (build jobs).
   php-matrix:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.versions.outputs.matrix }}
+      build_matrix: ${{ steps.versions.outputs.build_matrix }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -50,17 +56,31 @@ jobs:
         run: |
           # tag: the moving tag. The bare minor for a final release; a channel tag such as 8.6-rc
           # for a pre-release pin (8.6.0_rc3), so php:8.6 only appears once 8.6.0 is pinned.
-          matrix=$(grep -Ev '^[[:space:]]*(#|$)' alpine/php-versions.txt \
-            | jq -Rcn '{include: [inputs | [splits("\\s+")] | map(select(. != ""))
+          versions=$(grep -Ev '^[[:space:]]*(#|$)' alpine/php-versions.txt \
+            | jq -Rcn '[inputs | [splits("\\s+")] | map(select(. != ""))
                 | {minor: .[0], patch: .[1]}
                 | . + {prerelease: (.patch | test("_")),
-                       tag: (if (.patch | test("_")) then .minor + "-" + (.patch | capture("_(?<p>[a-z]+)").p) else .minor end)}]}')
+                       tag: (if (.patch | test("_")) then .minor + "-" + (.patch | capture("_(?<p>[a-z]+)").p) else .minor end)}]')
+          matrix=$(jq -cn --argjson v "$versions" '{include: $v}')
+          build_matrix=$(jq -cn --argjson v "$versions" '{include: [
+              $v[] as $x
+              | ({arch: "amd64", platform: "linux/amd64", runner: "ubuntu-24.04"},
+                 {arch: "arm64", platform: "linux/arm64", runner: "ubuntu-24.04-arm"})
+              | . + $x]}')
           echo "Matrix: $matrix"
+          echo "Build matrix: $build_matrix"
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "build_matrix=$build_matrix" >> "$GITHUB_OUTPUT"
 
-  # Build Base Image First
+  # ---- Base image ---------------------------------------------------------------------------
   build-base:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, platform: linux/amd64, runner: ubuntu-24.04 }
+          - { arch: arm64, platform: linux/arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -71,46 +91,87 @@ jobs:
           username: ${{ env.DOCKER_USER }}
           password: ${{ secrets.DOCKER_PAT }}
 
-      # arm64 layers are built under QEMU emulation on the amd64 runner
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
-        with:
-          platforms: arm64
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           version: ${{ env.BUILDX_VERSION }}
           driver: docker-container
 
-      - name: Install cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-
-      - name: Build Base Image candidate
+      - name: Build Base Image (${{ matrix.arch }}) by digest
+        id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          platforms: ${{ env.PLATFORMS }}
+          platforms: ${{ matrix.platform }}
           context: ./alpine/base
-          cache-from: type=gha,scope=base
-          cache-to: type=gha,mode=max,scope=base
-          tags: |
-            ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}:${{ env.CANDIDATE_TAG }}
-          outputs: 'type=registry'
+          cache-from: type=gha,scope=base-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=base-${{ matrix.arch }}
+          tags: ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
           provenance: true
           sbom: true
 
-      # Scan before anything is published under a consumable tag
-      - name: Run Trivy vulnerability scanner on Base Image candidate
+      # Scan and test on this architecture before the digest can become part of a public tag
+      - name: Run Trivy vulnerability scanner on Base Image (${{ matrix.arch }})
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}:${{ env.CANDIDATE_TAG }}
+          image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}@${{ steps.build.outputs.digest }}
           format: 'table'
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           ignore-unfixed: true
 
-      - name: Smoke test Base Image candidate
-        run: alpine/test.sh base ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}:${{ env.CANDIDATE_TAG }}
+      - name: Smoke test Base Image (${{ matrix.arch }})
+        run: alpine/test.sh base ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}@${{ steps.build.outputs.digest }}
+
+      - name: Export digest
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: digests-base-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-base:
+    needs: build-base
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ env.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_PAT }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: ${{ env.BUILDX_VERSION }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Download digests
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-base-*
+          merge-multiple: true
+
+      # Join the per-architecture images into one manifest list under the candidate tag
+      - name: Create Base Image candidate manifest list
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          [ "$(ls | wc -l)" -eq 2 ] || { echo "expected one digest per architecture, found: $(ls)"; exit 1; }
+          docker buildx imagetools create -t "${DOCKER_REGISTRY}/${BASE_IMAGE}:${CANDIDATE_TAG}" \
+            $(printf "${DOCKER_REGISTRY}/${BASE_IMAGE}@sha256:%s " *)
 
       - name: Attach VEX attestation to Base Image candidate
         uses: docker/scout-action@221e7f4860634eeb1579e3bd7ca232e577bd1864 # v1.26.0
@@ -126,13 +187,13 @@ jobs:
             -t ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}:latest \
             ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}:${{ env.CANDIDATE_TAG }}
 
-
       # Keyless Sigstore signature on the promoted manifest list. The certificate identity is this
       # workflow on the main branch; see docs/security/scanning-and-attestations for how to verify.
       - name: Sign Base Image
         run: |
           digest=$(docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}:latest --format '{{.Manifest.Digest}}')
           cosign sign --yes --recursive "${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}@${digest}"
+
       - name: Remove Base Image candidate tag
         if: always()
         continue-on-error: true
@@ -146,12 +207,15 @@ jobs:
             -H "Authorization: JWT ${token}" \
             "https://hub.docker.com/v2/repositories/${DOCKER_REGISTRY}/${BASE_IMAGE}/tags/${CANDIDATE_TAG}/"
 
-  # Build PHP and PHP-NGINX Images after Base Image
+  # ---- PHP images, one native build job per minor and architecture ---------------------------
+  # php -> php-nginx -> php-nginx-dev are chained on the same runner, each FROM the digest the
+  # previous step just pushed, so a minor never waits on another minor or on the other arch.
   build-php:
-    needs: [php-matrix, build-base]
-    runs-on: ubuntu-latest
+    needs: [php-matrix, publish-base]
     strategy:
-      matrix: ${{ fromJSON(needs.php-matrix.outputs.matrix) }}
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.php-matrix.outputs.build_matrix) }}
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -162,53 +226,168 @@ jobs:
           username: ${{ env.DOCKER_USER }}
           password: ${{ secrets.DOCKER_PAT }}
 
-      # arm64 layers are built under QEMU emulation on the amd64 runner
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
-        with:
-          platforms: arm64
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           version: ${{ env.BUILDX_VERSION }}
           driver: docker-container
 
-      - name: Install cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-
       - name: Prepare Clean PHP Version
         run: echo "PHP_VERSION=$(echo ${{ matrix.minor }} | tr -d '.')" >> $GITHUB_ENV
 
       # ---- PHP image ----------------------------------------------------------
-      - name: Build PHP Image (${{ matrix.minor }}) candidate
+      - name: Build PHP Image (${{ matrix.minor }}, ${{ matrix.arch }}) by digest
+        id: php
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          platforms: ${{ env.PLATFORMS }}
+          platforms: ${{ matrix.platform }}
           context: ./alpine/php
-          cache-from: type=gha,scope=php-${{ matrix.minor }}
-          cache-to: type=gha,mode=max,scope=php-${{ matrix.minor }}
+          cache-from: type=gha,scope=php-${{ matrix.minor }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=php-${{ matrix.minor }}-${{ matrix.arch }}
           pull: true
-          tags: |
-            ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
+          tags: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}
           build-args: |
             PHP_VERSION=${{ env.PHP_VERSION }}
             PHP_PATCH_VERSION=${{ matrix.patch }}
-          outputs: 'type=registry'
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
           provenance: true
           sbom: true
 
-      - name: Run Trivy vulnerability scanner on PHP Image (${{ matrix.minor }}) candidate
+      - name: Run Trivy vulnerability scanner on PHP Image (${{ matrix.minor }}, ${{ matrix.arch }})
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
+          image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}@${{ steps.php.outputs.digest }}
           format: 'table'
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           ignore-unfixed: true
 
-      - name: Smoke test PHP Image (${{ matrix.minor }}) candidate
-        run: alpine/test.sh php ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }} ${{ matrix.patch }}
+      - name: Smoke test PHP Image (${{ matrix.minor }}, ${{ matrix.arch }})
+        run: alpine/test.sh php ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}@${{ steps.php.outputs.digest }} ${{ matrix.patch }}
+
+      # ---- PHP-NGINX image (FROM the php digest above) -------------------------
+      - name: Build PHP-NGINX Image (${{ matrix.minor }}, ${{ matrix.arch }}) by digest
+        id: php-nginx
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          platforms: ${{ matrix.platform }}
+          context: ./alpine/php-nginx
+          cache-from: type=gha,scope=php-nginx-${{ matrix.minor }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=php-nginx-${{ matrix.minor }}-${{ matrix.arch }}
+          tags: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}
+          build-args: |
+            PHP_IMAGE=${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}@${{ steps.php.outputs.digest }}
+            PHP_IMAGE_TAG=${{ matrix.tag }}
+            PHP_VERSION=${{ env.PHP_VERSION }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          provenance: true
+          sbom: true
+
+      - name: Run Trivy vulnerability scanner on PHP-NGINX Image (${{ matrix.minor }}, ${{ matrix.arch }})
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}@${{ steps.php-nginx.outputs.digest }}
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
+
+      - name: Smoke test PHP-NGINX Image (${{ matrix.minor }}, ${{ matrix.arch }})
+        run: alpine/test.sh php-nginx ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}@${{ steps.php-nginx.outputs.digest }} ${{ matrix.patch }}
+
+      # ---- PHP-NGINX-DEV image (FROM the php-nginx digest above) ---------------
+      - name: Build PHP-NGINX-DEV Image (${{ matrix.minor }}, ${{ matrix.arch }}) by digest
+        id: php-nginx-dev
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          platforms: ${{ matrix.platform }}
+          context: ./alpine/php-nginx-dev
+          cache-from: type=gha,scope=php-nginx-dev-${{ matrix.minor }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=php-nginx-dev-${{ matrix.minor }}-${{ matrix.arch }}
+          tags: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}
+          build-args: |
+            PHP_IMAGE=${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}@${{ steps.php-nginx.outputs.digest }}
+            PHP_IMAGE_TAG=${{ matrix.tag }}
+            PHP_VERSION=${{ env.PHP_VERSION }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          provenance: true
+          sbom: true
+
+      - name: Run Trivy vulnerability scanner on PHP-NGINX-DEV Image (${{ matrix.minor }}, ${{ matrix.arch }})
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}@${{ steps.php-nginx-dev.outputs.digest }}
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
+
+      - name: Smoke test PHP-NGINX-DEV Image (${{ matrix.minor }}, ${{ matrix.arch }})
+        run: alpine/test.sh php-nginx-dev ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}@${{ steps.php-nginx-dev.outputs.digest }} ${{ matrix.patch }}
+
+      # One file per image, named "<image> <digest>", so the publish job can join them
+      - name: Export digests
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          for pair in "${PHP_IMAGE} ${{ steps.php.outputs.digest }}" \
+                      "${PHP_NGINX_IMAGE} ${{ steps.php-nginx.outputs.digest }}" \
+                      "${PHP_NGINX_DEV_IMAGE} ${{ steps.php-nginx-dev.outputs.digest }}"; do
+            set -- $pair
+            touch "${{ runner.temp }}/digests/$1 ${2#sha256:}"
+          done
+          ls -1 "${{ runner.temp }}/digests"
+
+      - name: Upload digests
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: digests-php-${{ matrix.minor }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # ---- Publish, one job per minor --------------------------------------------------------------
+  # Runs as long as the workflow was not cancelled, so a failing minor never blocks the others:
+  # a minor whose build legs failed has no digests and fails here on its own.
+  publish-php:
+    needs: [php-matrix, build-php]
+    if: ${{ !cancelled() && needs.php-matrix.result == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.php-matrix.outputs.matrix) }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ env.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_PAT }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: ${{ env.BUILDX_VERSION }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Download digests
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-php-${{ matrix.minor }}-*
+          merge-multiple: true
+
+      - name: Create candidate manifest lists (${{ matrix.minor }})
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          for repo in "${PHP_IMAGE}" "${PHP_NGINX_IMAGE}" "${PHP_NGINX_DEV_IMAGE}"; do
+            refs=$(for f in "${repo} "*; do printf '%s@sha256:%s ' "${DOCKER_REGISTRY}/${repo}" "${f#* }"; done)
+            [ "$(echo $refs | wc -w)" -eq 2 ] || { echo "expected one ${repo} digest per architecture, found: $(ls)"; exit 1; }
+            docker buildx imagetools create -t "${DOCKER_REGISTRY}/${repo}:${CANDIDATE_TAG}-${{ matrix.minor }}" $refs
+          done
 
       - name: Attach VEX attestation to PHP Image (${{ matrix.minor }}) candidate
         uses: docker/scout-action@221e7f4860634eeb1579e3bd7ca232e577bd1864 # v1.26.0
@@ -218,50 +397,6 @@ jobs:
           file: .vex/openvex.json
           predicate-type: https://openvex.dev/ns/v0.2.0
 
-      - name: Promote PHP Image (${{ matrix.minor }})
-        run: |
-          docker buildx imagetools create \
-            -t ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ matrix.tag }} \
-            -t ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ matrix.patch }} \
-            ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
-
-      # ---- PHP-NGINX image (built FROM the promoted php tag) -------------------
-
-      # Keyless Sigstore signature on the promoted manifest list. The certificate identity is this
-      # workflow on the main branch; see docs/security/scanning-and-attestations for how to verify.
-      - name: Sign PHP Image (${{ matrix.minor }})
-        run: |
-          digest=$(docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ matrix.tag }} --format '{{.Manifest.Digest}}')
-          cosign sign --yes --recursive "${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}@${digest}"
-      - name: Build PHP-NGINX Image (${{ matrix.minor }}) candidate
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          platforms: ${{ env.PLATFORMS }}
-          context: ./alpine/php-nginx
-          cache-from: type=gha,scope=php-nginx-${{ matrix.minor }}
-          cache-to: type=gha,mode=max,scope=php-nginx-${{ matrix.minor }}
-          pull: true
-          tags: |
-            ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
-          build-args: |
-            PHP_IMAGE_TAG=${{ matrix.tag }}
-            PHP_VERSION=${{ env.PHP_VERSION }}
-          outputs: 'type=registry'
-          provenance: true
-          sbom: true
-
-      - name: Run Trivy vulnerability scanner on PHP-NGINX Image (${{ matrix.minor }}) candidate
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
-          format: 'table'
-          severity: 'CRITICAL,HIGH'
-          exit-code: '1'
-          ignore-unfixed: true
-
-      - name: Smoke test PHP-NGINX Image (${{ matrix.minor }}) candidate
-        run: alpine/test.sh php-nginx ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }} ${{ matrix.patch }}
-
       - name: Attach VEX attestation to PHP-NGINX Image (${{ matrix.minor }}) candidate
         uses: docker/scout-action@221e7f4860634eeb1579e3bd7ca232e577bd1864 # v1.26.0
         with:
@@ -269,50 +404,6 @@ jobs:
           image: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
           file: .vex/openvex.json
           predicate-type: https://openvex.dev/ns/v0.2.0
-
-      - name: Promote PHP-NGINX Image (${{ matrix.minor }})
-        run: |
-          docker buildx imagetools create \
-            -t ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ matrix.tag }} \
-            -t ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ matrix.patch }} \
-            ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
-
-      # ---- PHP-NGINX-DEV image (built FROM the promoted php-nginx tag) ---------
-
-      # Keyless Sigstore signature on the promoted manifest list. The certificate identity is this
-      # workflow on the main branch; see docs/security/scanning-and-attestations for how to verify.
-      - name: Sign PHP-NGINX Image (${{ matrix.minor }})
-        run: |
-          digest=$(docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ matrix.tag }} --format '{{.Manifest.Digest}}')
-          cosign sign --yes --recursive "${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}@${digest}"
-      - name: Build PHP-NGINX-DEV Image (${{ matrix.minor }}) candidate
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          platforms: ${{ env.PLATFORMS }}
-          context: ./alpine/php-nginx-dev
-          cache-from: type=gha,scope=php-nginx-dev-${{ matrix.minor }}
-          cache-to: type=gha,mode=max,scope=php-nginx-dev-${{ matrix.minor }}
-          pull: true
-          tags: |
-            ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
-          build-args: |
-            PHP_IMAGE_TAG=${{ matrix.tag }}
-            PHP_VERSION=${{ env.PHP_VERSION }}
-          outputs: 'type=registry'
-          provenance: true
-          sbom: true
-
-      - name: Run Trivy vulnerability scanner on PHP-NGINX-DEV Image (${{ matrix.minor }}) candidate
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
-          format: 'table'
-          severity: 'CRITICAL,HIGH'
-          exit-code: '1'
-          ignore-unfixed: true
-
-      - name: Smoke test PHP-NGINX-DEV Image (${{ matrix.minor }}) candidate
-        run: alpine/test.sh php-nginx-dev ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }} ${{ matrix.patch }}
 
       - name: Attach VEX attestation to PHP-NGINX-DEV Image (${{ matrix.minor }}) candidate
         uses: docker/scout-action@221e7f4860634eeb1579e3bd7ca232e577bd1864 # v1.26.0
@@ -322,25 +413,31 @@ jobs:
           file: .vex/openvex.json
           predicate-type: https://openvex.dev/ns/v0.2.0
 
-      - name: Promote PHP-NGINX-DEV Image (${{ matrix.minor }})
+      # The moving tag (matrix.tag: the minor, or a channel tag such as 8.6-rc for a pre-release)
+      # and the immutable exact tag, in dependency order so php exists before php-nginx is visible
+      - name: Promote images (${{ matrix.minor }})
         run: |
-          docker buildx imagetools create \
-            -t ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ matrix.tag }} \
-            -t ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ matrix.patch }} \
-            ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
+          for repo in "${PHP_IMAGE}" "${PHP_NGINX_IMAGE}" "${PHP_NGINX_DEV_IMAGE}"; do
+            docker buildx imagetools create \
+              -t "${DOCKER_REGISTRY}/${repo}:${{ matrix.tag }}" \
+              -t "${DOCKER_REGISTRY}/${repo}:${{ matrix.patch }}" \
+              "${DOCKER_REGISTRY}/${repo}:${CANDIDATE_TAG}-${{ matrix.minor }}"
+          done
 
-
-      # Keyless Sigstore signature on the promoted manifest list. The certificate identity is this
+      # Keyless Sigstore signature on each promoted manifest list. The certificate identity is this
       # workflow on the main branch; see docs/security/scanning-and-attestations for how to verify.
-      - name: Sign PHP-NGINX-DEV Image (${{ matrix.minor }})
+      - name: Sign images (${{ matrix.minor }})
         run: |
-          digest=$(docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ matrix.tag }} --format '{{.Manifest.Digest}}')
-          cosign sign --yes --recursive "${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}@${digest}"
+          for repo in "${PHP_IMAGE}" "${PHP_NGINX_IMAGE}" "${PHP_NGINX_DEV_IMAGE}"; do
+            digest=$(docker buildx imagetools inspect "${DOCKER_REGISTRY}/${repo}:${{ matrix.tag }}" --format '{{.Manifest.Digest}}')
+            cosign sign --yes --recursive "${DOCKER_REGISTRY}/${repo}@${digest}"
+          done
+
       - name: Verify Built Images
         run: |
-          docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ matrix.tag }}
-          docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ matrix.tag }}
-          docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ matrix.tag }}
+          for repo in "${PHP_IMAGE}" "${PHP_NGINX_IMAGE}" "${PHP_NGINX_DEV_IMAGE}"; do
+            docker buildx imagetools inspect "${DOCKER_REGISTRY}/${repo}:${{ matrix.tag }}"
+          done
 
       - name: Remove candidate tags
         if: always()
