@@ -107,7 +107,7 @@ Supervisor manages all long-running processes inside containers:
 - Needs `contents: write` and `actions: write`, which the workflow requests itself
 
 ### Image build (`.github/workflows/docker-build.yml`)
-- **Triggers**: push to `main`, manual `workflow_dispatch`, weekly cron (so Alpine fixes ship without a code change)
+- **Triggers**: push to `main` (ignoring `docs/**`, Markdown, `LICENSE`, `docs-ci.yml` and `dependabot.yml`, so documentation changes never rebuild images), manual `workflow_dispatch`, weekly cron (so Alpine fixes ship without a code change)
 - **Scan before publish**: every image is pushed as `:candidate-<sha>[-<minor>]`, Trivy-scanned and VEX-attested, then promoted to its real tags with `docker buildx imagetools create`. Candidate tags are deleted via the Docker Hub API afterwards (best effort)
 - `DOCKER_PAT` is only exposed to the login and candidate-cleanup steps, never at workflow scope
 - Buildx is pinned to a mainline release via `BUILDX_VERSION`. Dependabot covers both GitHub Actions and the `alpine/base` Docker digest

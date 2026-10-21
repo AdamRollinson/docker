@@ -28,6 +28,8 @@ Connect the repository in the Cloudflare dashboard with these settings:
 
 Every push to `main` deploys production; every pull request gets a preview URL. Nitro detects Cloudflare Pages automatically, so no preset configuration is needed.
 
+Under **Settings, Builds, Build watch paths** set the include path to `docs/*` so that commits touching only the Dockerfiles do not trigger a docs deploy. The reverse is already handled: the image build workflow ignores pushes that only change `docs/**` or Markdown files.
+
 ## Structure
 
 ```

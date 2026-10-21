@@ -5,6 +5,15 @@ on:
   push:
     branches:
       - main
+    # Documentation, Markdown and the docs workflow never affect the images, so pushes that
+    # touch only those paths do not rebuild or republish anything. A push is skipped only
+    # when every changed file matches; mixed commits still build.
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+      - "LICENSE"
+      - ".github/workflows/docs-ci.yml"
+      - ".github/dependabot.yml"
   # Weekly rebuild so Alpine package fixes ship even when nothing in the repo changes
   schedule:
     - cron: "23 4 * * 1"
