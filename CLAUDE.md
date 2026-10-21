@@ -120,7 +120,8 @@ There is no supervisord (and therefore no Python) in the images since October 20
 - Publishes to Docker Hub with SBOM and provenance attestation
 - VEX attestations via `docker/scout-action` (attestation-add command)
 - Trivy vulnerability scanning (fails on CRITICAL/HIGH)
-- **Required secrets/vars**: `DOCKER_USER` (variable), `DOCKER_PAT` (secret, needs read/write/delete scope so candidate tags can be removed)
+- **Releases and notifications**: the `release` job (`contents: write`, `if: !cancelled()`) runs after `publish-php` and, for every matrix entry whose exact tag is published and has no `php-<patch>` GitHub release yet, creates one with `gh release create --target $GITHUB_SHA --latest=false` (plus `--prerelease` for `_` pins) using notes from `alpine/release-notes.sh` (image digests via `imagetools inspect`, cosign verify snippet; exits 3 when the tag is not on Hub). The `notify` job (`if: always()`) and the bump workflow call `alpine/notify.sh <status> <title> <message> [url]`, which POSTs JSON (`text` and `content` plus structured fields) to `NOTIFY_WEBHOOK_URL` and is a no-op when the secret is unset
+- **Required secrets/vars**: `DOCKER_USER` (variable), `DOCKER_PAT` (secret, needs read/write/delete scope so candidate tags can be removed), `NOTIFY_WEBHOOK_URL` (optional secret)
 
 ### Runtime user
 `appuser` is created in the base Dockerfile from the `APP_UID`/`APP_GID` build args (default 1000) and exported as env vars of the same name; `build.sh` forwards `APP_UID`/`APP_GID` from the environment. Derived images chown by name, so a custom UID propagates without changes. Never reintroduce setuid helpers (gosu, su-exec) for identity switching.

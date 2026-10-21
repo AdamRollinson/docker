@@ -45,3 +45,14 @@ jobs:
           git push origin HEAD:main
           gh workflow run docker-build.yml --ref main
           echo "Bumped to ${releases} and dispatched docker-build.yml"
+          echo "releases=${releases}" >> "$GITHUB_OUTPUT"
+        id: bump
+
+      - name: Notify
+        if: steps.bump.outputs.releases != ''
+        env:
+          NOTIFY_WEBHOOK_URL: ${{ secrets.NOTIFY_WEBHOOK_URL }}
+        run: |
+          alpine/notify.sh info "PHP pins bumped to ${{ steps.bump.outputs.releases }}" \
+            "Alpine now ships these releases; the image build has been dispatched and will notify again when it publishes." \
+            "${{ github.server_url }}/${{ github.repository }}/actions/workflows/docker-build.yml"

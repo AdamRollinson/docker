@@ -453,3 +453,72 @@ jobs:
               -H "Authorization: JWT ${token}" \
               "https://hub.docker.com/v2/repositories/${DOCKER_REGISTRY}/${repo}/tags/${CANDIDATE_TAG}-${{ matrix.minor }}/"
           done
+
+  # ---- Release notes and notifications ---------------------------------------------------------
+  # One GitHub release per published PHP release, tagged php-<release> (for example php-8.4.27),
+  # with the manifest digest of each image. Idempotent: a release that already exists is left
+  # alone, and a minor whose images did not reach their exact tag in this run is skipped.
+  release:
+    needs: [php-matrix, publish-php]
+    if: ${{ !cancelled() && needs.php-matrix.result == 'success' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: ${{ env.BUILDX_VERSION }}
+
+      - name: Create GitHub releases for newly published PHP releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          echo '${{ needs.php-matrix.outputs.matrix }}' | jq -r '.include[] | "\(.minor) \(.patch) \(.tag) \(.prerelease)"' \
+          | while read -r minor patch tag prerelease; do
+            name="php-${patch}"
+            if gh release view "$name" >/dev/null 2>&1; then
+              echo "${name}: release exists, skipping"
+              continue
+            fi
+            if ! alpine/release-notes.sh "$minor" "$patch" "$tag" "$GITHUB_SHA" > "notes-${patch}.md"; then
+              echo "${name}: images not published in this run, skipping"
+              continue
+            fi
+            flags=(--latest=false)
+            [ "$prerelease" = "true" ] && flags+=(--prerelease)
+            gh release create "$name" --target "$GITHUB_SHA" --title "PHP ${patch}" --notes-file "notes-${patch}.md" "${flags[@]}"
+            echo "${name}: created"
+          done
+
+  # Optional webhook (Slack, Discord, Mattermost, Teams via a connector, anything accepting JSON):
+  # set the NOTIFY_WEBHOOK_URL secret and every run reports what it published or where it failed.
+  notify:
+    needs: [php-matrix, publish-base, publish-php, release]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Send notification
+        env:
+          NOTIFY_WEBHOOK_URL: ${{ secrets.NOTIFY_WEBHOOK_URL }}
+          RESULTS: ${{ toJSON(needs) }}
+          MATRIX: ${{ needs.php-matrix.outputs.matrix }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          [ -n "$NOTIFY_WEBHOOK_URL" ] || { echo "NOTIFY_WEBHOOK_URL not set, skipping notification"; exit 0; }
+          summary=$(echo "$RESULTS" | jq -r 'to_entries | map("\(.key): \(.value.result)") | join(", ")')
+          versions=$(echo "$MATRIX" | jq -r '[.include[] | .patch] | join(", ")' 2>/dev/null || echo "unknown")
+          if echo "$RESULTS" | jq -e '[.[] | .result] | any(. == "failure" or . == "cancelled")' >/dev/null; then
+            alpine/notify.sh failure "Docker image build failed (${GITHUB_REF_NAME} @ ${GITHUB_SHA::12})" \
+              "Jobs: ${summary}. PHP pins: ${versions}." "$RUN_URL"
+          else
+            alpine/notify.sh success "Docker images published (${GITHUB_REF_NAME} @ ${GITHUB_SHA::12})" \
+              "PHP ${versions} for linux/amd64 and linux/arm64, scanned, tested and signed. Jobs: ${summary}." "$RUN_URL"
+          fi

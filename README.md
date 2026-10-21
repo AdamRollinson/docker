@@ -448,6 +448,7 @@ GitHub Actions (`.github/workflows/docker-build.yml`) builds and publishes all i
 - SBOM and provenance attestation on every image
 - VEX attestations for known false positives
 - Trivy vulnerability scanning (fails on CRITICAL/HIGH)
+- A GitHub release per published PHP release (`php-8.4.27`) with image digests, and optional webhook notifications (`NOTIFY_WEBHOOK_URL` secret) on bumps, publishes and failures
 
 ## License
 
