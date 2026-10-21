@@ -13,7 +13,7 @@ Docker image build system that produces multi-architecture (amd64/arm64) PHP con
 
 Supported PHP versions: **8.2, 8.3, 8.4, 8.5**, plus **8.6** as a pre-release from Alpine edge/testing
 
-The exact release for each minor version is pinned in `alpine/php-versions.txt` (format: `<minor> <release>` per line). This file is the single source of truth for both `build.sh` and the CI matrix. `alpine/check-php-versions.sh` compares the pins with the Alpine edge APKINDEX for both architectures; `--update` rewrites the file. The `php-version-bump` workflow runs that script daily and commits the result.
+The exact release for each minor version is pinned in `alpine/php-versions.txt` (format: `<minor> <release>` per line). This file is the single source of truth for both `build.sh` and the CI matrix. `alpine/check-php-versions.sh` compares the pins with the Alpine edge APKINDEX for both architectures and shows the latest php.net release per branch so an upstream security fix that Alpine has not packaged yet is visible (`CHECK_UPSTREAM=false` skips the lookup); only Alpine availability drives `--update`, which rewrites the file. The `php-version-bump` workflow runs that script daily and commits the result.
 
 ## Build Commands
 

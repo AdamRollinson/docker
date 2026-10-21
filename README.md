@@ -300,8 +300,9 @@ New releases are picked up automatically. The `php-version-bump` workflow runs d
 To check or bump manually:
 
 ```bash
-# Report pinned release vs Alpine edge for each minor
+# Report pinned release vs Alpine edge vs php.net for each minor
 alpine/check-php-versions.sh
+# PHP 8.4: pinned 8.4.26, Alpine edge 8.4.26, php.net 8.4.27 (security release, waiting on Alpine)
 
 # Rewrite alpine/php-versions.txt with the newest releases, then push to main
 alpine/check-php-versions.sh --update
