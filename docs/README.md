@@ -36,6 +36,21 @@ Non-production branches get preview URLs when "Builds for non-production branche
 
 To deploy from a machine with wrangler logged in: `pnpm generate && pnpm deploy`.
 
+## Headers, caching, crawlers
+
+Files in `public/` are copied into the output and picked up by Cloudflare:
+
+| File | Purpose |
+|------|---------|
+| `public/_headers` | Browser caching and security headers. Hashed assets (`/_nuxt`, `/_fonts`, `/_og`) are `immutable` for a year; pages and text endpoints are `max-age=0, must-revalidate` so a deploy shows immediately. Adds `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-Opener-Policy` and a Content-Security-Policy. Rules are merged, so the generic rule comes first and asset rules detach `Cache-Control` with `!` before setting their own. |
+| `public/robots.txt` | Allows every crawler, including AI crawlers, points at `/llms.txt` and the sitemap, and hides build artefacts. |
+| `public/.well-known/security.txt` | Vulnerability reporting contacts (RFC 9116). Update `Expires` yearly. |
+| `sitemap.xml` | Generated at build time by `@nuxtjs/sitemap` from the prerendered pages (raw Markdown and OG images excluded). |
+
+The CSP allows inline scripts and styles (Nuxt needs them) plus `wasm-unsafe-eval` and blob workers for the client-side search database. Any new external resource (fonts, images, embeds) needs a matching CSP source or it will be blocked.
+
+No zone-level Cache Rules are needed: Workers static assets are content-addressed and served from Cloudflare's edge, and a "Cache everything" rule with a long edge TTL would only make HTML stale after deploys. Enable **Always Use HTTPS** and **HSTS** on the zone, and leave AI crawler blocking off so the `llms.txt` audience can read the site.
+
 ## Structure
 
 ```

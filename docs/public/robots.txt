@@ -1,0 +1,14 @@
+# This is public documentation: everyone is welcome to index it, including AI crawlers.
+# Machine-readable summaries for language models: /llms.txt and /llms-full.txt
+# Every page is also available as Markdown at /raw/<path>.md
+
+User-agent: *
+Allow: /
+
+# Build artefacts and generated images carry no content worth indexing
+Disallow: /_nuxt/
+Disallow: /_fonts/
+Disallow: /_og/
+Disallow: /*/_payload.json
+
+Sitemap: https://docker.rollogi.co.uk/sitemap.xml
