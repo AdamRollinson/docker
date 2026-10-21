@@ -47,7 +47,9 @@ Files in `public/` are copied into the output and picked up by Cloudflare:
 | `public/.well-known/security.txt` | Vulnerability reporting contacts (RFC 9116). Update `Expires` yearly. |
 | `sitemap.xml` | Generated at build time by `@nuxtjs/sitemap` from the prerendered pages (raw Markdown and OG images excluded). |
 
-The CSP allows inline scripts and styles (Nuxt needs them) plus `wasm-unsafe-eval` and blob workers for the client-side search database. Any new external resource (fonts, images, embeds) needs a matching CSP source or it will be blocked.
+The CSP allows inline scripts and styles (Nuxt needs them), `wasm-unsafe-eval` and blob workers for the client-side search database, and Cloudflare Web Analytics (`static.cloudflareinsights.com` script, `cloudflareinsights.com` beacon), which the edge injects into HTML. Any new external resource (fonts, images, embeds) needs a matching CSP source or it will be blocked.
+
+Icons are bundled at build time (`icon.provider: 'none'` with a scan that includes `content/`), so no icon is ever fetched from the Iconify API at runtime. If an icon shows as missing, check the "Nuxt Icon client bundle" line in the build output and make sure the file naming it is covered by the scan globs in `nuxt.config.ts`.
 
 No zone-level Cache Rules are needed: Workers static assets are content-addressed and served from Cloudflare's edge, and a "Cache everything" rule with a long edge TTL would only make HTML stale after deploys. Enable **Always Use HTTPS** and **HSTS** on the zone, and leave AI crawler blocking off so the `llms.txt` audience can read the site.
 
