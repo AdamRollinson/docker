@@ -14,7 +14,7 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": {
-    "@iconify-json/lucide": "^1.2.145",
+    "@iconify-json/lucide": "^1.2.146",
     "@iconify-json/simple-icons": "^1.2.100",
     "@iconify-json/vscode-icons": "^1.2.90",
     "@nuxt/content": "^3.16.2",
