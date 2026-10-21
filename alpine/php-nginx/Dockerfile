@@ -64,6 +64,10 @@ RUN set -eux; \
         if [ "${installed}" != "${expected}" ]; then \
             echo "ERROR: pinned PHP-FPM ${PHP_PATCH_VERSION} but ${installed} was installed"; exit 1; \
         fi; \
+        mismatched="$(apk list -I 2>/dev/null | awk '{print $1}' | grep "^php${PHP_VERSION}" | grep -v -- '-pecl-' | grep -v -- "-${PHP_PATCH_VERSION}-r" || true)"; \
+        if [ -n "${mismatched}" ]; then \
+            echo "ERROR: these php${PHP_VERSION} packages do not match the pinned release ${PHP_PATCH_VERSION}:"; echo "${mismatched}"; exit 1; \
+        fi; \
     fi; \
     rm /etc/nginx/http.d/default.conf; \
     mkdir -p /var/log/php-fpm /etc/nginx/after.d /etc/nginx/http-conf.d; \
