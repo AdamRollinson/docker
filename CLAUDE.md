@@ -108,7 +108,7 @@ Supervisor manages all long-running processes inside containers:
 - **Triggers**: push to `main`, manual `workflow_dispatch`, weekly cron (so Alpine fixes ship without a code change)
 - **Scan before publish**: every image is pushed as `:candidate-<sha>[-<minor>]`, Trivy-scanned and VEX-attested, then promoted to its real tags with `docker buildx imagetools create`. Candidate tags are deleted via the Docker Hub API afterwards (best effort)
 - `DOCKER_PAT` is only exposed to the login and candidate-cleanup steps, never at workflow scope
-- Buildx is pinned via `BUILDX_VERSION`; Dependabot covers both GitHub Actions and the `alpine/base` Docker digest
+- Buildx is pinned via `BUILDX_VERSION`. Because the builder uses `driver: cloud`, setup-buildx-action resolves the version against the cloud channel (`buildx-lab-releases.json`), so the value must be a `cloud:vX.Y.Z-desktop.N` tag, not a mainline buildx release. Dependabot covers both GitHub Actions and the `alpine/base` Docker digest
 - **Build strategy**: a `php-matrix` job turns `alpine/php-versions.txt` into a matrix (`minor`/`patch`), base image builds first, then PHP versions in parallel
 - Each image is pushed with two tags: `:{minor}` and `:{patch}`
 - Uses **Docker Build Cloud** (`adamrollogi/medusa` endpoint) for multi-arch builds

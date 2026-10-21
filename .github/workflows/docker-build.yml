@@ -20,7 +20,8 @@ env:
   PHP_NGINX_IMAGE: php-nginx
   PHP_NGINX_DEV_IMAGE: php-nginx-dev
   PLATFORMS: "linux/amd64,linux/arm64"
-  BUILDX_VERSION: v0.38.1
+  # Must be a cloud-channel tag: with driver=cloud the action resolves versions against buildx-lab-releases.json
+  BUILDX_VERSION: cloud:v0.36.1-desktop.1
   # Images are pushed under this tag first, scanned, and only then promoted to their real tags
   CANDIDATE_TAG: candidate-${{ github.sha }}
 
