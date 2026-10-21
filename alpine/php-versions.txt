@@ -10,6 +10,6 @@
 #   docker run --rm alpine:3.23 apk search -x \
 #     --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community \
 #     --repository=https://dl-cdn.alpinelinux.org/alpine/edge/testing php84
-8.2 8.2.35
-8.3 8.3.36
-8.4 8.4.27
+8.2 8.2.34
+8.3 8.3.35
+8.4 8.4.26
