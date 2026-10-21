@@ -330,7 +330,7 @@ docker build \
 
 GitHub Actions (`.github/workflows/docker-build.yml`) builds and publishes all images on push to `main`:
 
-- Multi-arch builds via Docker Build Cloud
+- Multi-arch builds with buildx (`docker-container` driver), arm64 via QEMU, layers cached in GitHub Actions cache
 - PHP versions build in parallel (matrix generated from `alpine/php-versions.txt`)
 - SBOM and provenance attestation on every image
 - VEX attestations for known false positives

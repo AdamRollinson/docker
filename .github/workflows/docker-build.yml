@@ -1,4 +1,4 @@
-name: Docker Multi-Arch Build with Build Cloud
+name: Docker Multi-Arch Build
 
 on:
   workflow_dispatch:
@@ -20,8 +20,7 @@ env:
   PHP_NGINX_IMAGE: php-nginx
   PHP_NGINX_DEV_IMAGE: php-nginx-dev
   PLATFORMS: "linux/amd64,linux/arm64"
-  # Must be a cloud-channel tag: with driver=cloud the action resolves versions against buildx-lab-releases.json
-  BUILDX_VERSION: cloud:v0.36.1-desktop.1
+  BUILDX_VERSION: v0.38.1
   # Images are pushed under this tag first, scanned, and only then promoted to their real tags
   CANDIDATE_TAG: candidate-${{ github.sha }}
 
@@ -56,19 +55,25 @@ jobs:
           username: ${{ env.DOCKER_USER }}
           password: ${{ secrets.DOCKER_PAT }}
 
-      - name: Set up Docker Buildx with Build Cloud
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      # arm64 layers are built under QEMU emulation on the amd64 runner
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           version: ${{ env.BUILDX_VERSION }}
-          driver: cloud
-          endpoint: "${{ env.DOCKER_USER }}/medusa"
-          install: true
+          driver: docker-container
 
-      - name: Build Base Image candidate with Build Cloud
+      - name: Build Base Image candidate
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           platforms: ${{ env.PLATFORMS }}
           context: ./alpine/base
+          cache-from: type=gha,scope=base
+          cache-to: type=gha,mode=max,scope=base
           tags: |
             ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}:${{ env.CANDIDATE_TAG }}
           outputs: 'type=registry'
@@ -128,23 +133,29 @@ jobs:
           username: ${{ env.DOCKER_USER }}
           password: ${{ secrets.DOCKER_PAT }}
 
-      - name: Set up Docker Buildx with Build Cloud
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      # arm64 layers are built under QEMU emulation on the amd64 runner
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           version: ${{ env.BUILDX_VERSION }}
-          driver: cloud
-          endpoint: "${{ env.DOCKER_USER }}/medusa"
-          install: true
+          driver: docker-container
 
       - name: Prepare Clean PHP Version
         run: echo "PHP_VERSION=$(echo ${{ matrix.minor }} | tr -d '.')" >> $GITHUB_ENV
 
       # ---- PHP image ----------------------------------------------------------
-      - name: Build PHP Image (${{ matrix.minor }}) candidate with Build Cloud
+      - name: Build PHP Image (${{ matrix.minor }}) candidate
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           platforms: ${{ env.PLATFORMS }}
           context: ./alpine/php
+          cache-from: type=gha,scope=php-${{ matrix.minor }}
+          cache-to: type=gha,mode=max,scope=php-${{ matrix.minor }}
           pull: true
           tags: |
             ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
@@ -180,11 +191,13 @@ jobs:
             ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
 
       # ---- PHP-NGINX image (built FROM the promoted php tag) -------------------
-      - name: Build PHP-NGINX Image (${{ matrix.minor }}) candidate with Build Cloud
+      - name: Build PHP-NGINX Image (${{ matrix.minor }}) candidate
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           platforms: ${{ env.PLATFORMS }}
           context: ./alpine/php-nginx
+          cache-from: type=gha,scope=php-nginx-${{ matrix.minor }}
+          cache-to: type=gha,mode=max,scope=php-nginx-${{ matrix.minor }}
           pull: true
           tags: |
             ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
@@ -220,11 +233,13 @@ jobs:
             ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
 
       # ---- PHP-NGINX-DEV image (built FROM the promoted php-nginx tag) ---------
-      - name: Build PHP-NGINX-DEV Image (${{ matrix.minor }}) candidate with Build Cloud
+      - name: Build PHP-NGINX-DEV Image (${{ matrix.minor }}) candidate
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           platforms: ${{ env.PLATFORMS }}
           context: ./alpine/php-nginx-dev
+          cache-from: type=gha,scope=php-nginx-dev-${{ matrix.minor }}
+          cache-to: type=gha,mode=max,scope=php-nginx-dev-${{ matrix.minor }}
           pull: true
           tags: |
             ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}

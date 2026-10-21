@@ -48,6 +48,7 @@ is_newer() {
 }
 
 updates=0
+skipped=0
 while read -r minor pinned; do
     pkg="php${minor//./}"
     amd64=$(edge_version "$pkg" x86_64)
@@ -55,10 +56,12 @@ while read -r minor pinned; do
 
     if [ -z "$amd64" ] || [ -z "$arm64" ]; then
         echo "PHP $minor: pinned $pinned, $pkg missing from edge (amd64='$amd64' arm64='$arm64'), skipping"
+        skipped=$((skipped + 1))
         continue
     fi
     if [ "$amd64" != "$arm64" ]; then
         echo "PHP $minor: pinned $pinned, edge architectures disagree (amd64=$amd64 arm64=$arm64), skipping"
+        skipped=$((skipped + 1))
         continue
     fi
     if [ "$amd64" = "$pinned" ]; then
@@ -66,7 +69,8 @@ while read -r minor pinned; do
         continue
     fi
     if ! is_newer "$amd64" "$pinned"; then
-        echo "PHP $minor: pinned $pinned, edge has older $amd64, skipping"
+        echo "PHP $minor: pinned $pinned, edge has older $amd64 (pin is ahead of edge, build will fail), skipping"
+        skipped=$((skipped + 1))
         continue
     fi
 
@@ -79,8 +83,10 @@ while read -r minor pinned; do
     fi
 done < <(grep -Ev '^[[:space:]]*(#|$)' "$VERSIONS_FILE")
 
-if [ "$updates" -eq 0 ]; then
+if [ "$updates" -eq 0 ] && [ "$skipped" -eq 0 ]; then
     echo "All pinned PHP releases match Alpine edge"
+elif [ "$updates" -eq 0 ]; then
+    echo "$skipped pin(s) could not be reconciled with Alpine edge, see above"
 elif ! $UPDATE; then
     echo "$updates update(s) available, run with --update to apply"
 fi

@@ -108,14 +108,14 @@ Supervisor manages all long-running processes inside containers:
 - **Triggers**: push to `main`, manual `workflow_dispatch`, weekly cron (so Alpine fixes ship without a code change)
 - **Scan before publish**: every image is pushed as `:candidate-<sha>[-<minor>]`, Trivy-scanned and VEX-attested, then promoted to its real tags with `docker buildx imagetools create`. Candidate tags are deleted via the Docker Hub API afterwards (best effort)
 - `DOCKER_PAT` is only exposed to the login and candidate-cleanup steps, never at workflow scope
-- Buildx is pinned via `BUILDX_VERSION`. Because the builder uses `driver: cloud`, setup-buildx-action resolves the version against the cloud channel (`buildx-lab-releases.json`), so the value must be a `cloud:vX.Y.Z-desktop.N` tag, not a mainline buildx release. Dependabot covers both GitHub Actions and the `alpine/base` Docker digest
+- Buildx is pinned to a mainline release via `BUILDX_VERSION`. Dependabot covers both GitHub Actions and the `alpine/base` Docker digest
 - **Build strategy**: a `php-matrix` job turns `alpine/php-versions.txt` into a matrix (`minor`/`patch`), base image builds first, then PHP versions in parallel
 - Each image is pushed with two tags: `:{minor}` and `:{patch}`
-- Uses **Docker Build Cloud** (`adamrollogi/medusa` endpoint) for multi-arch builds
+- Multi-arch builds use plain **buildx** with the `docker-container` driver on `ubuntu-latest`; arm64 layers are emulated with QEMU (`docker/setup-qemu-action`). Layer cache lives in the GitHub Actions cache (`type=gha`, one scope per image). Docker Build Cloud was dropped in October 2026 after its builder started refusing builds (`concurrent build limit of 0`)
 - Publishes to Docker Hub with SBOM and provenance attestation
 - VEX attestations via `docker/scout-action` (attestation-add command)
 - Trivy vulnerability scanning (fails on CRITICAL/HIGH)
-- **Required secrets/vars**: `DOCKER_USER` (variable), `DOCKER_PAT` (secret)
+- **Required secrets/vars**: `DOCKER_USER` (variable), `DOCKER_PAT` (secret, needs read/write/delete scope so candidate tags can be removed)
 
 ## Key Files
 
