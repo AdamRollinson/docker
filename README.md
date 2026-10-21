@@ -318,6 +318,17 @@ See [ENV.md](ENV.md) for the complete variable reference including OPcache, secu
 
 bcmath, ctype, curl, dom, exif, fileinfo, gd, iconv, intl, json, mbstring, mysqli, opcache, pcntl, pdo, pdo_mysql, phar, posix, redis, session, simplexml, soap, tokenizer, xml, xmlreader, xmlwriter, zip, imagick
 
+Need more? Build your own variant with `PHP_EXTRA_EXTENSIONS`; core extensions are pinned to the PHP release and PECL ones resolve automatically:
+
+```bash
+docker build --build-arg PHP_VERSION=84 --build-arg PHP_PATCH_VERSION=8.4.27 \
+  --build-arg PHP_EXTRA_EXTENSIONS="pgsql pdo_pgsql ldap memcached apcu amqp yaml" \
+  -t myorg/php:8.4 ./alpine/php
+PHP_EXTRA_EXTENSIONS="pgsql pdo_pgsql" ./alpine/build.sh    # whole set
+```
+
+An unavailable extension fails the build with the package names it tried, and the chosen set is recorded in the `io.rollogi.php.extra-extensions` label.
+
 `opcache` and `imagick` are installed when Alpine packages them for the PHP version (opcache is built in from 8.5; imagick is missing on 8.6 for now). The build logs a notice rather than failing when one is unavailable.
 
 ## Security

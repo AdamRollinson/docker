@@ -9,6 +9,10 @@ USER root
 #   PHP_PATCH_VERSION - exact release to pin (e.g. 8.3.35); empty installs whatever edge has
 ARG PHP_VERSION
 ARG PHP_PATCH_VERSION
+# Space-separated extra extensions for a custom build, e.g. "pgsql pdo_pgsql ldap memcached apcu".
+# Core extensions are installed pinned to the PHP release; PECL ones (memcached, apcu, amqp,
+# yaml, ...) are tried as php8x-pecl-<name>. The default image adds none to stay small.
+ARG PHP_EXTRA_EXTENSIONS=""
 
 # Expose both so downstream images (php-nginx) install a matching php-fpm
 ENV PHP_VERSION=${PHP_VERSION} \
@@ -126,6 +130,23 @@ RUN set -eux; \
             "php${PHP_VERSION}-${optional}" 2>/dev/null \
             || echo "NOTICE: php${PHP_VERSION}-${optional%%~*} is not packaged for this PHP version"; \
     done; \
+    for ext in ${PHP_EXTRA_EXTENSIONS}; do \
+        if apk add --no-cache \
+            --repository=https://dl-cdn.alpinelinux.org/alpine/edge/main \
+            --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community \
+            --repository=https://dl-cdn.alpinelinux.org/alpine/edge/testing \
+            "php${PHP_VERSION}-${ext}${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}}" 2>/dev/null; then \
+            echo "INFO: installed extra extension ${ext}"; \
+        elif apk add --no-cache \
+            --repository=https://dl-cdn.alpinelinux.org/alpine/edge/main \
+            --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community \
+            --repository=https://dl-cdn.alpinelinux.org/alpine/edge/testing \
+            "php${PHP_VERSION}-pecl-${ext}" 2>/dev/null; then \
+            echo "INFO: installed extra PECL extension ${ext}"; \
+        else \
+            echo "ERROR: extra extension '${ext}' is not packaged for php${PHP_VERSION} (tried php${PHP_VERSION}-${ext} and php${PHP_VERSION}-pecl-${ext})"; exit 1; \
+        fi; \
+    done; \
     apk add --no-cache msmtp; \
     # Pre-releases differ in spelling between apk (8.6.0_rc3) and PHP (8.6.0RC3); normalise both
     if [ -n "${PHP_PATCH_VERSION}" ]; then \
@@ -161,7 +182,8 @@ LABEL org.opencontainers.image.title="adamrollogi/php" \
       org.opencontainers.image.description="PHP CLI with Composer and extensions on Alpine 3.24" \
       org.opencontainers.image.version="${PHP_PATCH_VERSION}" \
       org.opencontainers.image.source="https://github.com/adamrollogi/docker" \
-      org.opencontainers.image.licenses="MIT"
+      org.opencontainers.image.licenses="MIT" \
+      io.rollogi.php.extra-extensions="${PHP_EXTRA_EXTENSIONS}"
 
 # Copy entrypoint script (shared helpers come from the base image at /usr/local/lib/entrypoint-lib.sh)
 COPY php-entrypoint.sh /usr/local/bin/

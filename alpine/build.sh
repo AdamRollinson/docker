@@ -30,10 +30,11 @@ while read -r version patch; do
     IMAGE_TAG="$PHP_IMAGE:$version"
     PATCH_TAG="$PHP_IMAGE:$patch"
 
-    echo "🐘 Building PHP image: $IMAGE_TAG ($PATCH_TAG) with PHP_VERSION=$PHP_VERSION_ENV PHP_PATCH_VERSION=$patch"
+    echo "🐘 Building PHP image: $IMAGE_TAG ($PATCH_TAG) with PHP_VERSION=$PHP_VERSION_ENV PHP_PATCH_VERSION=$patch${PHP_EXTRA_EXTENSIONS:+ PHP_EXTRA_EXTENSIONS=\"$PHP_EXTRA_EXTENSIONS\"}"
     docker build \
         --build-arg PHP_VERSION="$PHP_VERSION_ENV" \
         --build-arg PHP_PATCH_VERSION="$patch" \
+        --build-arg PHP_EXTRA_EXTENSIONS="${PHP_EXTRA_EXTENSIONS:-}" \
         -t "$IMAGE_TAG" \
         -t "$PATCH_TAG" \
         ./php
