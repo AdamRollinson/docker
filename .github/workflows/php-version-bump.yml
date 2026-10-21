@@ -1,13 +1,13 @@
 name: Bump Pinned PHP Versions
 
-# Checks Alpine edge daily for newer PHP releases. When one has landed for every
+# Checks Alpine edge every four hours for newer PHP releases. When one has landed for every
 # architecture we build, the pin in alpine/php-versions.txt is updated, committed
 # to main and the Docker build workflow is dispatched so the new images are
 # built and pushed without manual intervention.
 
 on:
   schedule:
-    - cron: "17 6 * * *"
+    - cron: "17 */4 * * *"
   workflow_dispatch:
 
 permissions:
@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Compare pinned releases with Alpine edge
         run: alpine/check-php-versions.sh --update

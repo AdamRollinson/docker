@@ -59,8 +59,9 @@ RUN set -eux; \
         php${PHP_VERSION}-fpm${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
         gettext-envsubst; \
     if [ -n "${PHP_PATCH_VERSION}" ]; then \
-        installed="$(php-fpm${PHP_VERSION} -v | awk 'NR==1 {print $2}')"; \
-        if [ "${installed}" != "${PHP_PATCH_VERSION}" ]; then \
+        installed="$(php-fpm${PHP_VERSION} -v | awk 'NR==1 {print tolower($2)}')"; \
+        expected="$(printf '%s' "${PHP_PATCH_VERSION}" | tr -d '_' | tr 'A-Z' 'a-z')"; \
+        if [ "${installed}" != "${expected}" ]; then \
             echo "ERROR: pinned PHP-FPM ${PHP_PATCH_VERSION} but ${installed} was installed"; exit 1; \
         fi; \
     fi; \
@@ -70,7 +71,7 @@ RUN set -eux; \
 
 # OCI metadata labels
 LABEL org.opencontainers.image.title="adamrollogi/php-nginx" \
-      org.opencontainers.image.description="PHP-FPM + Nginx web stack on Alpine 3.23" \
+      org.opencontainers.image.description="PHP-FPM + Nginx web stack on Alpine 3.24" \
       org.opencontainers.image.version="${PHP_PATCH_VERSION}" \
       org.opencontainers.image.source="https://github.com/adamrollogi/docker" \
       org.opencontainers.image.licenses="MIT"

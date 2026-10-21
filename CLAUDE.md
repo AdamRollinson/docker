@@ -6,14 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Docker image build system that produces multi-architecture (amd64/arm64) PHP container images published to Docker Hub under `adamrollogi/`. Three layered images are built:
 
-1. **`adamrollogi/base:latest`** — Alpine 3.23 base with common tools and Supervisor
+1. **`adamrollogi/base:latest`** — Alpine 3.24 base with common tools and Supervisor
 2. **`adamrollogi/php:{version}`** — PHP CLI with Composer and extensions (builds on base)
 3. **`adamrollogi/php-nginx:{version}`** — PHP-FPM + Nginx web stack (builds on php)
 4. **`adamrollogi/php-nginx-dev:{version}`** — php-nginx plus Xdebug and development defaults (builds on php-nginx)
 
-Supported PHP versions: **8.2, 8.3, 8.4**
+Supported PHP versions: **8.2, 8.3, 8.4, 8.5**, plus **8.6** as a pre-release from Alpine edge/testing
 
-The exact release for each minor version is pinned in `alpine/php-versions.txt` (format: `<minor> <release>` per line). This file is the single source of truth for both `build.sh` and the CI matrix. `alpine/check-php-versions.sh` compares the pins with the Alpine edge APKINDEX for both architectures; `--update` rewrites the file. The `php-version-bump` workflow runs that script daily and commits the result.
+The exact release for each minor version is pinned in `alpine/php-versions.txt` (format: `<minor> <release>` per line). This file is the single source of truth for both `build.sh` and the CI matrix. `alpine/check-php-versions.sh` compares the pins with the Alpine edge APKINDEX for both architectures and shows the latest php.net release per branch so an upstream security fix that Alpine has not packaged yet is visible (`CHECK_UPSTREAM=false` skips the lookup); only Alpine availability drives `--update`, which rewrites the file. The `php-version-bump` workflow runs that script every four hours and commits the result.
 
 ## Build Commands
 
@@ -22,7 +22,7 @@ The exact release for each minor version is pinned in `alpine/php-versions.txt` 
 # From the alpine/ directory:
 cd alpine && ./build.sh
 ```
-This builds all images sequentially: base → php (×3 versions) → php-nginx (×3 versions) → php-nginx-dev (×3 versions). Images are tagged locally with both the minor and the pinned release (e.g., `adamrollogi/php:8.3` and `adamrollogi/php:8.3.35`).
+This builds all images sequentially: base → php (×5 versions) → php-nginx (×5 versions) → php-nginx-dev (×5 versions). Images are tagged locally with both the minor and the pinned release (e.g., `adamrollogi/php:8.3` and `adamrollogi/php:8.3.35`).
 
 ### Build a single image manually
 ```bash
@@ -40,7 +40,7 @@ docker build --build-arg PHP_IMAGE_TAG=8.3 --build-arg PHP_VERSION=83 -t adamrol
 
 ### Image Inheritance Chain
 ```
-Alpine 3.23
+Alpine 3.24
   └── base (supervisor, bash, curl, git, envsubst)
         └── php:{version} (PHP CLI, Composer, extensions, php.ini.template)
               └── php-nginx:{version} (Nginx, PHP-FPM, config templates)
@@ -63,6 +63,8 @@ PHP versions use two formats throughout the codebase:
 - **Release** (`8.3.35`) — `PHP_PATCH_VERSION` build arg, applied as an apk constraint (`php83~8.3.35`) and used as an extra image tag
 
 The build script converts between them: `PHP_VERSION_ENV=$(echo "$version" | tr -d '.')`
+
+Pre-release pins use Alpine's spelling (`8.6.0_rc3`); PHP reports `8.6.0RC3`, so the post-install assertion lowercases PHP_VERSION and strips underscores from the pin before comparing. `check-php-versions.sh` treats a final release as newer than any pre-release of the same base. `opcache` and `pecl-imagick` are installed as optional packages (notice, not failure, when absent): opcache is built into the core package from PHP 8.5 and imagick is not yet packaged for 8.6.
 
 Only the core `php83` package (and `php83-fpm` in php-nginx) carries the pin. Extension subpackages depend on `php83-common` at the exact same release so they follow automatically, and `php83-cli` / `php83-json` are virtual names provided by the core package, so they cannot be constrained. php-nginx reads `PHP_PATCH_VERSION` from the php image's `ENV` rather than taking its own build arg, so php-fpm always matches the installed PHP. Both Dockerfiles assert the installed version after `apk add` and fail the build on a mismatch. If `PHP_PATCH_VERSION` is empty, the latest release in Alpine edge is installed unpinned.
 
@@ -99,7 +101,7 @@ Supervisor manages all long-running processes inside containers:
 ## CI/CD
 
 ### Automatic PHP release bumps (`.github/workflows/php-version-bump.yml`)
-- **Triggers**: daily cron, manual `workflow_dispatch`
+- **Triggers**: cron every four hours (`17 */4 * * *`), manual `workflow_dispatch`
 - Runs `alpine/check-php-versions.sh --update`. A minor is only bumped when the same release exists in edge for both `x86_64` and `aarch64`
 - Commits the change to `main` as `github-actions[bot]`, then dispatches `docker-build.yml` with `gh workflow run` (pushes made with `GITHUB_TOKEN` do not trigger other workflows on their own)
 - Needs `contents: write` and `actions: write`, which the workflow requests itself
@@ -124,7 +126,7 @@ Supervisor manages all long-running processes inside containers:
 | `alpine/build.sh` | Local build script for all images |
 | `alpine/php-versions.txt` | Pinned PHP release per supported minor version |
 | `alpine/check-php-versions.sh` | Compares pins with Alpine edge, `--update` rewrites the file |
-| `.github/workflows/php-version-bump.yml` | Daily job that bumps pins and dispatches the build |
+| `.github/workflows/php-version-bump.yml` | Four-hourly job that bumps pins and dispatches the build |
 | `alpine/base/Dockerfile` | Base Alpine image with common tooling |
 | `alpine/php/Dockerfile` | PHP image with extensions and Composer |
 | `alpine/php/php.ini.template` | Runtime PHP configuration template |
