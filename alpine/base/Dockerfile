@@ -48,9 +48,15 @@ LABEL org.opencontainers.image.title="adamrollogi/base" \
       org.opencontainers.image.source="https://github.com/adamrollogi/docker" \
       org.opencontainers.image.licenses="MIT"
 
-# Create non-root application user
-RUN addgroup -g 1000 -S appuser && \
-    adduser -u 1000 -S appuser -G appuser
+# Create the non-root application user. Override the IDs at build time so bind-mounted
+# files owned by your host user are writable without chown gymnastics:
+#   docker build --build-arg APP_UID=$(id -u) --build-arg APP_GID=$(id -g) ...
+ARG APP_UID=1000
+ARG APP_GID=1000
+ENV APP_UID=${APP_UID} \
+    APP_GID=${APP_GID}
+RUN addgroup -g "${APP_GID}" -S appuser && \
+    adduser -u "${APP_UID}" -S appuser -G appuser
 
 # Set working directory
 WORKDIR /app

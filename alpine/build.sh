@@ -15,9 +15,14 @@ read_php_versions() {
     grep -Ev '^[[:space:]]*(#|$)' "$PHP_VERSIONS_FILE"
 }
 
+# Optional UID/GID for the runtime user (defaults to 1000:1000 inside the Dockerfile)
+BASE_BUILD_ARGS=()
+[ -n "${APP_UID:-}" ] && BASE_BUILD_ARGS+=(--build-arg "APP_UID=$APP_UID")
+[ -n "${APP_GID:-}" ] && BASE_BUILD_ARGS+=(--build-arg "APP_GID=$APP_GID")
+
 # Build base image
-echo "🚀 Building base image: $BASE_IMAGE"
-docker build -t "$BASE_IMAGE" ./base
+echo "🚀 Building base image: $BASE_IMAGE${APP_UID:+ (uid $APP_UID${APP_GID:+:$APP_GID})}"
+docker build "${BASE_BUILD_ARGS[@]}" -t "$BASE_IMAGE" ./base
 
 # Build PHP images
 while read -r version patch; do

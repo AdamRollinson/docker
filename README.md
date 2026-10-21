@@ -79,6 +79,17 @@ All images default to running as `appuser` (UID 1000). When running as non-root:
 
 Use `--user root` when you need privileged ports or cron.
 
+### Matching your host user
+
+Bind-mounted files are read and written as UID 1000. For local development with a different host UID, either run with `--user "$(id -u):$(id -g)"`, which the images support out of the box, or bake your IDs into the base image so every derived image inherits them:
+
+```bash
+docker build --build-arg APP_UID=$(id -u) --build-arg APP_GID=$(id -g) -t adamrollogi/base:latest ./alpine/base
+APP_UID=$(id -u) APP_GID=$(id -g) ./alpine/build.sh    # or the whole set
+```
+
+The chosen IDs are exported as `APP_UID` and `APP_GID` inside the containers. Adjust the `uid=`/`gid=` options in the read-only recipe to match.
+
 ### Running with a read-only root filesystem
 
 Rendered configuration is written to `/run/nginx` and `/run/php` rather than `/etc`, so the image works with a read-only root filesystem. This also means any config tampering is discarded when the container restarts.
