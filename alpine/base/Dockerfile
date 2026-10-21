@@ -44,7 +44,7 @@ RUN apk upgrade --no-cache && \
 
 # OCI metadata labels
 LABEL org.opencontainers.image.title="adamrollogi/base" \
-      org.opencontainers.image.description="Alpine 3.23 base with Supervisor and common tools" \
+      org.opencontainers.image.description="Alpine 3.24 base with Supervisor and common tools" \
       org.opencontainers.image.source="https://github.com/adamrollogi/docker" \
       org.opencontainers.image.licenses="MIT"
 

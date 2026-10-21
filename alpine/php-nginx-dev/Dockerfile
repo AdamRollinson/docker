@@ -39,7 +39,7 @@ RUN set -eux; \
 
 # OCI metadata labels
 LABEL org.opencontainers.image.title="adamrollogi/php-nginx-dev" \
-      org.opencontainers.image.description="PHP-FPM + Nginx development stack with Xdebug on Alpine 3.23" \
+      org.opencontainers.image.description="PHP-FPM + Nginx development stack with Xdebug on Alpine 3.24" \
       org.opencontainers.image.version="${PHP_PATCH_VERSION}" \
       org.opencontainers.image.source="https://github.com/adamrollogi/docker" \
       org.opencontainers.image.licenses="MIT"

@@ -1,12 +1,12 @@
 # Docker PHP Images
 
-Multi-architecture (amd64/arm64) PHP container images built on Alpine Linux 3.23 and published to Docker Hub under `adamrollogi/`.
+Multi-architecture (amd64/arm64) PHP container images built on Alpine Linux 3.24 and published to Docker Hub under `adamrollogi/`.
 
 ## Images
 
 | Image | Description |
 |-------|-------------|
-| `adamrollogi/base:latest` | Alpine 3.23 base with Supervisor, tini, bash, curl, git |
+| `adamrollogi/base:latest` | Alpine 3.24 base with Supervisor, tini, bash, curl, git |
 | `adamrollogi/php:{version}` | PHP CLI with Composer and common extensions |
 | `adamrollogi/php-nginx:{version}` | PHP-FPM + Nginx web stack with optional HTTPS |
 | `adamrollogi/php-nginx-dev:{version}` | php-nginx plus Xdebug, visible errors and uncached assets, for local development |
@@ -20,7 +20,7 @@ Each image is published under two tags: the minor version (`php:8.4`, tracks the
 ### Image inheritance
 
 ```
-Alpine 3.23
+Alpine 3.24
   └── base (supervisor, bash, curl, git, envsubst, tini)
         └── php:{version} (PHP CLI, Composer, extensions)
               └── php-nginx:{version} (Nginx, PHP-FPM, SSL support)

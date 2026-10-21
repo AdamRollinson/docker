@@ -126,7 +126,7 @@ RUN curl -sS https://getcomposer.org/installer -o composer-setup.php && \
 
 # OCI metadata labels
 LABEL org.opencontainers.image.title="adamrollogi/php" \
-      org.opencontainers.image.description="PHP CLI with Composer and extensions on Alpine 3.23" \
+      org.opencontainers.image.description="PHP CLI with Composer and extensions on Alpine 3.24" \
       org.opencontainers.image.version="${PHP_PATCH_VERSION}" \
       org.opencontainers.image.source="https://github.com/adamrollogi/docker" \
       org.opencontainers.image.licenses="MIT"
