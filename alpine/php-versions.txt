@@ -5,7 +5,8 @@
 # version constraint, so a build fails instead of silently installing a
 # different PHP. Images are tagged with both values (php:8.3 and php:8.3.35).
 #
-# The release must exist in Alpine edge (community, or testing for 8.2). Check
+# The release must exist in Alpine edge (community, or testing for 8.2 and
+# pre-release 8.6). Pre-releases use Alpine's spelling, e.g. 8.6.0_rc3. Check
 # the current packages with:
 #   docker run --rm alpine:3.23 apk search -x \
 #     --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community \
@@ -13,3 +14,5 @@
 8.2 8.2.34
 8.3 8.3.35
 8.4 8.4.26
+8.5 8.5.11
+8.6 8.6.0_rc3

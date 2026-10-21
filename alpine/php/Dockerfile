@@ -72,7 +72,6 @@ RUN set -eux; \
         php${PHP_VERSION}-pdo \
         php${PHP_VERSION}-pdo_mysql \
         php${PHP_VERSION}-zip \
-        php${PHP_VERSION}-opcache \
         php${PHP_VERSION}-intl \
         php${PHP_VERSION}-simplexml \
         php${PHP_VERSION}-pcntl \
@@ -86,16 +85,27 @@ RUN set -eux; \
         php${PHP_VERSION}-soap \
         php${PHP_VERSION}-phar \
         php${PHP_VERSION}-pecl-redis \
-        php${PHP_VERSION}-pecl-imagick \
         php${PHP_VERSION}-mysqli \
         php${PHP_VERSION}-gd \
         php${PHP_VERSION}-bcmath \
         php${PHP_VERSION}-ctype \
         php${PHP_VERSION}-iconv \
         php${PHP_VERSION}-session; \
+    # Optional packages: opcache is compiled into the core package from PHP 8.5, and
+    # pecl-imagick lags new PHP majors in Alpine. Missing ones are reported, not fatal.
+    for optional in opcache pecl-imagick; do \
+        apk add --no-cache \
+            --repository=https://dl-cdn.alpinelinux.org/alpine/edge/main \
+            --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community \
+            --repository=https://dl-cdn.alpinelinux.org/alpine/edge/testing \
+            "php${PHP_VERSION}-${optional}" 2>/dev/null \
+            || echo "NOTICE: php${PHP_VERSION}-${optional} is not packaged for this PHP version"; \
+    done; \
+    # Pre-releases differ in spelling between apk (8.6.0_rc3) and PHP (8.6.0RC3); normalise both
     if [ -n "${PHP_PATCH_VERSION}" ]; then \
-        installed="$(php${PHP_VERSION} -r 'echo PHP_VERSION;')"; \
-        if [ "${installed}" != "${PHP_PATCH_VERSION}" ]; then \
+        installed="$(php${PHP_VERSION} -r 'echo strtolower(PHP_VERSION);')"; \
+        expected="$(printf '%s' "${PHP_PATCH_VERSION}" | tr -d '_' | tr 'A-Z' 'a-z')"; \
+        if [ "${installed}" != "${expected}" ]; then \
             echo "ERROR: pinned PHP ${PHP_PATCH_VERSION} but ${installed} was installed"; exit 1; \
         fi; \
     fi; \

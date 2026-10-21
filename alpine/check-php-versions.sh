@@ -42,9 +42,20 @@ edge_version() {
     done
 }
 
-# True when $1 is a strictly newer version than $2
+# True when $1 is a strictly newer version than $2. Alpine spells pre-releases with an
+# underscore (8.6.0_rc3); a final release always beats a pre-release of the same base.
 is_newer() {
-    [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n1)" = "$1" ]
+    local a="$1" b="$2" a_base="${1%%_*}" b_base="${2%%_*}" a_pre="" b_pre=""
+    [ "$a" != "$b" ] || return 1
+    case "$a" in *_*) a_pre="${a#*_}" ;; esac
+    case "$b" in *_*) b_pre="${b#*_}" ;; esac
+    if [ "$a_base" != "$b_base" ]; then
+        [ "$(printf '%s\n%s\n' "$a_base" "$b_base" | sort -V | tail -n1)" = "$a_base" ]
+        return
+    fi
+    [ -z "$a_pre" ] && [ -n "$b_pre" ] && return 0
+    [ -n "$a_pre" ] && [ -z "$b_pre" ] && return 1
+    [ "$(printf '%s\n%s\n' "$a_pre" "$b_pre" | sort -V | tail -n1)" = "$a_pre" ]
 }
 
 updates=0

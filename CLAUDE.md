@@ -11,7 +11,7 @@ Docker image build system that produces multi-architecture (amd64/arm64) PHP con
 3. **`adamrollogi/php-nginx:{version}`** — PHP-FPM + Nginx web stack (builds on php)
 4. **`adamrollogi/php-nginx-dev:{version}`** — php-nginx plus Xdebug and development defaults (builds on php-nginx)
 
-Supported PHP versions: **8.2, 8.3, 8.4**
+Supported PHP versions: **8.2, 8.3, 8.4, 8.5**, plus **8.6** as a pre-release from Alpine edge/testing
 
 The exact release for each minor version is pinned in `alpine/php-versions.txt` (format: `<minor> <release>` per line). This file is the single source of truth for both `build.sh` and the CI matrix. `alpine/check-php-versions.sh` compares the pins with the Alpine edge APKINDEX for both architectures; `--update` rewrites the file. The `php-version-bump` workflow runs that script daily and commits the result.
 
@@ -22,7 +22,7 @@ The exact release for each minor version is pinned in `alpine/php-versions.txt` 
 # From the alpine/ directory:
 cd alpine && ./build.sh
 ```
-This builds all images sequentially: base → php (×3 versions) → php-nginx (×3 versions) → php-nginx-dev (×3 versions). Images are tagged locally with both the minor and the pinned release (e.g., `adamrollogi/php:8.3` and `adamrollogi/php:8.3.35`).
+This builds all images sequentially: base → php (×5 versions) → php-nginx (×5 versions) → php-nginx-dev (×5 versions). Images are tagged locally with both the minor and the pinned release (e.g., `adamrollogi/php:8.3` and `adamrollogi/php:8.3.35`).
 
 ### Build a single image manually
 ```bash
@@ -63,6 +63,8 @@ PHP versions use two formats throughout the codebase:
 - **Release** (`8.3.35`) — `PHP_PATCH_VERSION` build arg, applied as an apk constraint (`php83~8.3.35`) and used as an extra image tag
 
 The build script converts between them: `PHP_VERSION_ENV=$(echo "$version" | tr -d '.')`
+
+Pre-release pins use Alpine's spelling (`8.6.0_rc3`); PHP reports `8.6.0RC3`, so the post-install assertion lowercases PHP_VERSION and strips underscores from the pin before comparing. `check-php-versions.sh` treats a final release as newer than any pre-release of the same base. `opcache` and `pecl-imagick` are installed as optional packages (notice, not failure, when absent): opcache is built into the core package from PHP 8.5 and imagick is not yet packaged for 8.6.
 
 Only the core `php83` package (and `php83-fpm` in php-nginx) carries the pin. Extension subpackages depend on `php83-common` at the exact same release so they follow automatically, and `php83-cli` / `php83-json` are virtual names provided by the core package, so they cannot be constrained. php-nginx reads `PHP_PATCH_VERSION` from the php image's `ENV` rather than taking its own build arg, so php-fpm always matches the installed PHP. Both Dockerfiles assert the installed version after `apk add` and fail the build on a mismatch. If `PHP_PATCH_VERSION` is empty, the latest release in Alpine edge is installed unpinned.
 

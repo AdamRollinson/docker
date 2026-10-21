@@ -11,7 +11,9 @@ Multi-architecture (amd64/arm64) PHP container images built on Alpine Linux 3.23
 | `adamrollogi/php-nginx:{version}` | PHP-FPM + Nginx web stack with optional HTTPS |
 | `adamrollogi/php-nginx-dev:{version}` | php-nginx plus Xdebug, visible errors and uncached assets, for local development |
 
-**Supported PHP versions:** 8.2, 8.3, 8.4
+**Supported PHP versions:** 8.2, 8.3, 8.4, 8.5, and 8.6 as a pre-release
+
+PHP 8.6 is published from Alpine's testing repository while it is in release candidate (tag `php:8.6`, and the exact tag follows Alpine's spelling, e.g. `php:8.6.0_rc3`). Treat it as experimental until 8.6.0 ships. The `imagick` extension is not yet packaged for 8.6, and from 8.5 onward OPcache is compiled into PHP itself rather than installed as a separate package.
 
 Each image is published under two tags: the minor version (`php:8.4`, tracks the latest pinned release) and the exact release (`php:8.4.26`, immutable). Pin the exact tag in production if you want to control when PHP updates roll out.
 
@@ -261,6 +263,8 @@ See [ENV.md](ENV.md) for the complete variable reference including OPcache, secu
 
 bcmath, ctype, curl, dom, exif, fileinfo, gd, iconv, intl, json, mbstring, mysqli, opcache, pcntl, pdo, pdo_mysql, phar, posix, redis, session, simplexml, soap, tokenizer, xml, xmlreader, xmlwriter, zip, imagick
 
+`opcache` and `imagick` are installed when Alpine packages them for the PHP version (opcache is built in from 8.5; imagick is missing on 8.6 for now). The build logs a notice rather than failing when one is unavailable.
+
 ## Security
 
 - Non-root execution by default (UID 1000), no setuid or setgid binaries in any image
@@ -285,7 +289,7 @@ See [SECURITY.md](SECURITY.md) for CVE details and VEX attestations.
 cd alpine && ./build.sh
 ```
 
-This builds all 10 images sequentially: base, php (x3 versions), php-nginx (x3 versions), php-nginx-dev (x3 versions).
+This builds all 16 images sequentially: base, php (x5 versions), php-nginx (x5 versions), php-nginx-dev (x5 versions).
 
 ### Pinned PHP releases
 
