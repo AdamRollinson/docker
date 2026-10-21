@@ -20,6 +20,8 @@ on:
 
 permissions:
   contents: read
+  # id-token lets cosign sign images keylessly with this workflow's OIDC identity
+  id-token: write
 
 env:
   DOCKER_USER: ${{ vars.DOCKER_USER }}
@@ -76,6 +78,9 @@ jobs:
           version: ${{ env.BUILDX_VERSION }}
           driver: docker-container
 
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
       - name: Build Base Image candidate
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -116,6 +121,13 @@ jobs:
             -t ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}:latest \
             ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}:${{ env.CANDIDATE_TAG }}
 
+
+      # Keyless Sigstore signature on the promoted manifest list. The certificate identity is this
+      # workflow on the main branch; see docs/security/scanning-and-attestations for how to verify.
+      - name: Sign Base Image
+        run: |
+          digest=$(docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}:latest --format '{{.Manifest.Digest}}')
+          cosign sign --yes --recursive "${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}@${digest}"
       - name: Remove Base Image candidate tag
         if: always()
         continue-on-error: true
@@ -156,6 +168,9 @@ jobs:
         with:
           version: ${{ env.BUILDX_VERSION }}
           driver: docker-container
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Prepare Clean PHP Version
         run: echo "PHP_VERSION=$(echo ${{ matrix.minor }} | tr -d '.')" >> $GITHUB_ENV
@@ -206,6 +221,13 @@ jobs:
             ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
 
       # ---- PHP-NGINX image (built FROM the promoted php tag) -------------------
+
+      # Keyless Sigstore signature on the promoted manifest list. The certificate identity is this
+      # workflow on the main branch; see docs/security/scanning-and-attestations for how to verify.
+      - name: Sign PHP Image (${{ matrix.minor }})
+        run: |
+          digest=$(docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ matrix.minor }} --format '{{.Manifest.Digest}}')
+          cosign sign --yes --recursive "${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}@${digest}"
       - name: Build PHP-NGINX Image (${{ matrix.minor }}) candidate
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -251,6 +273,13 @@ jobs:
             ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
 
       # ---- PHP-NGINX-DEV image (built FROM the promoted php-nginx tag) ---------
+
+      # Keyless Sigstore signature on the promoted manifest list. The certificate identity is this
+      # workflow on the main branch; see docs/security/scanning-and-attestations for how to verify.
+      - name: Sign PHP-NGINX Image (${{ matrix.minor }})
+        run: |
+          digest=$(docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ matrix.minor }} --format '{{.Manifest.Digest}}')
+          cosign sign --yes --recursive "${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}@${digest}"
       - name: Build PHP-NGINX-DEV Image (${{ matrix.minor }}) candidate
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -295,6 +324,13 @@ jobs:
             -t ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ matrix.patch }} \
             ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
 
+
+      # Keyless Sigstore signature on the promoted manifest list. The certificate identity is this
+      # workflow on the main branch; see docs/security/scanning-and-attestations for how to verify.
+      - name: Sign PHP-NGINX-DEV Image (${{ matrix.minor }})
+        run: |
+          digest=$(docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ matrix.minor }} --format '{{.Manifest.Digest}}')
+          cosign sign --yes --recursive "${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}@${digest}"
       - name: Verify Built Images
         run: |
           docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ matrix.minor }}

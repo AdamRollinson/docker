@@ -281,7 +281,7 @@ bcmath, ctype, curl, dom, exif, fileinfo, gd, iconv, intl, json, mbstring, mysql
 - HTTP-to-HTTPS redirect targets a configured host rather than reflecting the request `Host` header
 - Base image pins to Alpine digest for supply chain integrity, Alpine repositories fetched over HTTPS
 - CI builds every image under a candidate tag, scans it with Trivy, and only promotes it to the public tags when the scan passes
-- SBOM, provenance and VEX attestations on every image; images are rebuilt weekly so Alpine fixes ship without a code change
+- SBOM, provenance and VEX attestations on every image, plus a keyless Sigstore signature from the build workflow's identity (`cosign verify`); images are rebuilt weekly so Alpine fixes ship without a code change
 
 See [SECURITY.md](SECURITY.md) for CVE details and VEX attestations.
 
