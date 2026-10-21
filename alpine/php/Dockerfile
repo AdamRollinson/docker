@@ -54,9 +54,13 @@ ENV PHP_EXPOSE_PHP=Off \
     PHP_SENDMAIL_PATH=""
 
 # Install PHP with scoped edge repos (prevents edge repos leaking to downstream images).
-# Only the core package carries the version pin: the extension subpackages depend on
-# php${PHP_VERSION}-common at the exact same release, and -cli / -json are virtual
-# names provided by the core package, so they cannot be constrained directly.
+# Every PHP package carries the same release pin. Alpine's extension packages depend on
+# php${PHP_VERSION}-common WITHOUT a version constraint, so when edge rolls to a new release
+# an unpinned extension would be installed against the pinned (older) core and fail to load
+# (ABI mismatch). -cli and -json are virtual names provided by the pinned core/common packages
+# and cannot be constrained; pecl-* packages have their own version numbers. common, openssl,
+# sockets and mysqlnd are listed explicitly because apk would otherwise pull them in unpinned
+# as dependencies, and a final check below rejects any php package at a different release.
 RUN set -eux; \
     apk update && apk upgrade; \
     apk add --no-cache \
@@ -64,42 +68,46 @@ RUN set -eux; \
         --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community \
         --repository=https://dl-cdn.alpinelinux.org/alpine/edge/testing \
         php${PHP_VERSION}${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-common${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-openssl${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-sockets${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-mysqlnd${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
         php${PHP_VERSION}-cli \
         php${PHP_VERSION}-json \
-        php${PHP_VERSION}-mbstring \
-        php${PHP_VERSION}-curl \
-        php${PHP_VERSION}-xml \
-        php${PHP_VERSION}-pdo \
-        php${PHP_VERSION}-pdo_mysql \
-        php${PHP_VERSION}-zip \
-        php${PHP_VERSION}-intl \
-        php${PHP_VERSION}-simplexml \
-        php${PHP_VERSION}-pcntl \
-        php${PHP_VERSION}-fileinfo \
-        php${PHP_VERSION}-tokenizer \
-        php${PHP_VERSION}-dom \
-        php${PHP_VERSION}-posix \
-        php${PHP_VERSION}-xmlwriter \
-        php${PHP_VERSION}-xmlreader \
-        php${PHP_VERSION}-exif \
-        php${PHP_VERSION}-soap \
-        php${PHP_VERSION}-phar \
+        php${PHP_VERSION}-mbstring${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-curl${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-xml${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-pdo${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-pdo_mysql${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-zip${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-intl${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-simplexml${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-pcntl${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-fileinfo${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-tokenizer${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-dom${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-posix${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-xmlwriter${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-xmlreader${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-exif${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-soap${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-phar${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
         php${PHP_VERSION}-pecl-redis \
-        php${PHP_VERSION}-mysqli \
-        php${PHP_VERSION}-gd \
-        php${PHP_VERSION}-bcmath \
-        php${PHP_VERSION}-ctype \
-        php${PHP_VERSION}-iconv \
-        php${PHP_VERSION}-session; \
+        php${PHP_VERSION}-mysqli${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-gd${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-bcmath${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-ctype${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-iconv${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-session${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}}; \
     # Optional packages: opcache is compiled into the core package from PHP 8.5, and
     # pecl-imagick lags new PHP majors in Alpine. Missing ones are reported, not fatal.
-    for optional in opcache pecl-imagick; do \
+    for optional in "opcache${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}}" pecl-imagick; do \
         apk add --no-cache \
             --repository=https://dl-cdn.alpinelinux.org/alpine/edge/main \
             --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community \
             --repository=https://dl-cdn.alpinelinux.org/alpine/edge/testing \
             "php${PHP_VERSION}-${optional}" 2>/dev/null \
-            || echo "NOTICE: php${PHP_VERSION}-${optional} is not packaged for this PHP version"; \
+            || echo "NOTICE: php${PHP_VERSION}-${optional%%~*} is not packaged for this PHP version"; \
     done; \
     # Pre-releases differ in spelling between apk (8.6.0_rc3) and PHP (8.6.0RC3); normalise both
     if [ -n "${PHP_PATCH_VERSION}" ]; then \
@@ -107,6 +115,12 @@ RUN set -eux; \
         expected="$(printf '%s' "${PHP_PATCH_VERSION}" | tr -d '_' | tr 'A-Z' 'a-z')"; \
         if [ "${installed}" != "${expected}" ]; then \
             echo "ERROR: pinned PHP ${PHP_PATCH_VERSION} but ${installed} was installed"; exit 1; \
+        fi; \
+        # Every php package that is not a PECL extension must carry the pinned release, including
+        # ones apk pulled in as dependencies; a stray newer package means mismatched extensions
+        mismatched="$(apk list -I 2>/dev/null | awk '{print $1}' | grep "^php${PHP_VERSION}" | grep -v -- '-pecl-' | grep -v -- "-${PHP_PATCH_VERSION}-r" || true)"; \
+        if [ -n "${mismatched}" ]; then \
+            echo "ERROR: these php${PHP_VERSION} packages do not match the pinned release ${PHP_PATCH_VERSION}:"; echo "${mismatched}"; exit 1; \
         fi; \
     fi; \
     find / -xdev -type f -perm /6000 -exec chmod a-s {} +

@@ -295,16 +295,16 @@ This builds all 16 images sequentially: base, php (x5 versions), php-nginx (x5 v
 
 ### Pinned PHP releases
 
-The exact PHP release for each minor version lives in [`alpine/php-versions.txt`](alpine/php-versions.txt). Both `build.sh` and the CI workflow read it, pass the release to the Dockerfiles as `PHP_PATCH_VERSION`, and install the Alpine package with a version constraint (`php84~8.4.26`). A build fails if Alpine edge no longer carries that release, rather than silently shipping a different PHP.
+The exact PHP release for each minor version lives in [`alpine/php-versions.txt`](alpine/php-versions.txt). Both `build.sh` and the CI workflow read it, pass the release to the Dockerfiles as `PHP_PATCH_VERSION`, and install every PHP package (core, extensions and php-fpm) with the same version constraint (`php84~8.4.26`). A build fails if Alpine no longer carries that release, rather than silently shipping a different PHP or a mismatched set of extensions.
 
-New releases are picked up automatically. The `php-version-bump` workflow runs every four hours, compares the pins against the Alpine edge package index for both amd64 and arm64, and when a newer release is available on both it commits the bump to `main` and dispatches the build workflow. Alpine edge usually lags php.net by a few days, so a release announced today typically ships within the week, and within four hours of Alpine packaging it.
+New releases are picked up automatically. The `php-version-bump` workflow runs every four hours, compares the pins against the Alpine package indexes the images install from (the stable branch and edge, both architectures), and when a newer release is available on both architectures it commits the bump to `main` and dispatches the build workflow. Alpine usually lags php.net by a few days, so a release announced today typically ships within the week, and within four hours of Alpine packaging it.
 
 To check or bump manually:
 
 ```bash
-# Report pinned release vs Alpine edge vs php.net for each minor
+# Report pinned release vs Alpine vs php.net for each minor
 alpine/check-php-versions.sh
-# PHP 8.4: pinned 8.4.26, Alpine edge 8.4.26, php.net 8.4.27 (security release, waiting on Alpine)
+# PHP 8.4: pinned 8.4.26, Alpine 8.4.26, php.net 8.4.27 (security release, waiting on Alpine)
 
 # Rewrite alpine/php-versions.txt with the newest releases, then push to main
 alpine/check-php-versions.sh --update
@@ -318,7 +318,7 @@ You can also trigger the bump workflow from the Actions tab via "Run workflow".
 # Base
 docker build -t adamrollogi/base:latest ./alpine/base
 
-# PHP 8.4 (omit PHP_PATCH_VERSION to install whatever Alpine edge currently has)
+# PHP 8.4 (omit PHP_PATCH_VERSION to install whatever Alpine currently has)
 docker build \
   --build-arg PHP_VERSION=84 \
   --build-arg PHP_PATCH_VERSION=8.4.26 \
