@@ -82,7 +82,7 @@ jobs:
 
       # Scan before anything is published under a consumable tag
       - name: Run Trivy vulnerability scanner on Base Image candidate
-        uses: aquasecurity/trivy-action@c1824fd6edce30d7ab345a9989de00bbd46ef284 # v0.34.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}:${{ env.CANDIDATE_TAG }}
           format: 'table'
@@ -167,7 +167,7 @@ jobs:
           sbom: true
 
       - name: Run Trivy vulnerability scanner on PHP Image (${{ matrix.minor }}) candidate
-        uses: aquasecurity/trivy-action@c1824fd6edce30d7ab345a9989de00bbd46ef284 # v0.34.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
           format: 'table'
@@ -209,7 +209,7 @@ jobs:
           sbom: true
 
       - name: Run Trivy vulnerability scanner on PHP-NGINX Image (${{ matrix.minor }}) candidate
-        uses: aquasecurity/trivy-action@c1824fd6edce30d7ab345a9989de00bbd46ef284 # v0.34.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
           format: 'table'
@@ -251,7 +251,7 @@ jobs:
           sbom: true
 
       - name: Run Trivy vulnerability scanner on PHP-NGINX-DEV Image (${{ matrix.minor }}) candidate
-        uses: aquasecurity/trivy-action@c1824fd6edce30d7ab345a9989de00bbd46ef284 # v0.34.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
           format: 'table'
