@@ -22,29 +22,20 @@ RUN apk upgrade --no-cache && \
     git \
     wget \
     nano \
-    supervisor \
     shadow \
     gcompat \
-    py3-pip \
     gettext-envsubst \
     tini && \
-    # Alpine's py3-setuptools (80.x) is affected by CVE-2026-59890, fixed in 83.0.0.
-    # supervisor 4.3.0 uses importlib rather than pkg_resources, so no upper bound is needed.
-    pip3 install --no-cache-dir --break-system-packages --root-user-action=ignore 'setuptools>=83.0.0' && \
-    apk del py3-pip && \
     # Remove setuid/setgid bits: nothing in these images needs privilege escalation helpers
     find / -xdev -type f -perm /6000 -exec chmod a-s {} + && \
     # Set timezone
     ln -sf /usr/share/zoneinfo/${TZ} /etc/localtime && \
     echo "${TZ}" > /etc/timezone && \
-    # Clean up and set permissions
-    mkdir -p /etc/cron.d /var/log && \
-    touch /var/log/cron.log && \
-    chmod 0644 /var/log/cron.log
+    mkdir -p /var/log
 
 # OCI metadata labels
 LABEL org.opencontainers.image.title="adamrollogi/base" \
-      org.opencontainers.image.description="Alpine 3.24 base with Supervisor and common tools" \
+      org.opencontainers.image.description="Alpine 3.24 base with tini, cron and common tools" \
       org.opencontainers.image.source="https://github.com/adamrollogi/docker" \
       org.opencontainers.image.licenses="MIT"
 
@@ -63,9 +54,6 @@ WORKDIR /app
 
 # Set ownership of working directory
 RUN chown appuser:appuser /app
-
-# Copy only necessary configuration files
-COPY --chown=root:root supervisord.conf /etc/supervisord.conf
 
 # Shared entrypoint helpers and the service wrapper that tags log lines per service
 COPY --chown=root:root entrypoint-lib.sh /usr/local/lib/entrypoint-lib.sh

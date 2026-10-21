@@ -8,7 +8,7 @@ Full documentation: https://docker.rollogi.co.uk (source in `docs/`). This READM
 
 | Image | Description |
 |-------|-------------|
-| `adamrollogi/base:latest` | Alpine 3.24 base with Supervisor, tini, bash, curl, git |
+| `adamrollogi/base:latest` | Alpine 3.24 base with tini, cron, bash, curl, git |
 | `adamrollogi/php:{version}` | PHP CLI with Composer and common extensions |
 | `adamrollogi/php-nginx:{version}` | PHP-FPM + Nginx web stack with optional HTTPS |
 | `adamrollogi/php-nginx-dev:{version}` | php-nginx plus Xdebug, visible errors and uncached assets, for local development |
@@ -23,7 +23,7 @@ Each image is published under two tags: the minor version (`php:8.4`, tracks the
 
 ```
 Alpine 3.24
-  └── base (supervisor, bash, curl, git, envsubst, tini)
+  └── base (tini, cron, bash, curl, git, envsubst)
         └── php:{version} (PHP CLI, Composer, extensions)
               └── php-nginx:{version} (Nginx, PHP-FPM, SSL support)
                     └── php-nginx-dev:{version} (Xdebug, dev defaults)
@@ -74,7 +74,7 @@ docker run --rm -d -p 80:80 -p 443:443 --user root \
 All images default to running as `appuser` (UID 1000). When running as non-root:
 
 - Ports below 1024 (80, 443) are unavailable — use `8080`, `8443`, etc.
-- Cron is not available — use `--user root` for full Supervisor mode with cron
+- Cron is not available — use `--user root`, which also starts crond
 - PHP-FPM runs without `user`/`group` directives (automatically stripped)
 
 Use `--user root` when you need privileged ports or cron.
@@ -158,7 +158,6 @@ Everything logs to the container's stdout and stderr by default, and every line 
 | `[php-fpm]` | stderr | FPM master and pool messages, PHP `error_log()` output, slow-request traces |
 | `[cron]` | stderr | crond output (root mode only) |
 | `[entrypoint]` | stdout | startup messages from the entrypoint scripts |
-| *(untagged)* | stderr | supervisord's own messages (root mode only), e.g. `INFO spawned: 'nginx'` |
 
 ```bash
 docker logs -f app 2>&1                        # everything
@@ -183,7 +182,7 @@ docker logs app 2>&1 | jq -c 'select(.service == "nginx" and .status >= 500)'
 **File mode** (`LOG_MODE=file`) writes `/var/log/nginx/access.log`, `/var/log/nginx/error.log`, `/var/log/php-fpm/error.log` and `/var/log/php-fpm/slow.log`, with no tags. Mount `/var/log` to keep them, and tail them in place with the bundled helper:
 
 ```bash
-docker exec app container-logs -f php-fpm     # nginx | php-fpm | cron | supervisor | all
+docker exec app container-logs -f php-fpm     # nginx | php-fpm | cron | all
 ```
 
 Individual destinations can still be overridden with `NGINX_ACCESS_LOG` (`off` disables it), `NGINX_ERROR_LOG`, `PHP_FPM_ERROR_LOG` and `PHP_FPM_SLOWLOG`.

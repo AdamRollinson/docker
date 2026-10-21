@@ -1,5 +1,5 @@
 #!/bin/bash
-# Usage: container-logs [-f] [nginx|php-fpm|cron|supervisor|all]
+# Usage: container-logs [-f] [nginx|php-fpm|cron|all]
 #
 # In LOG_MODE=file: tails the per-service log files under /var/log.
 # In LOG_MODE=stdout (default): explains how to filter "docker logs" by service tag.
@@ -17,7 +17,7 @@ Logs are written to the container's stdout/stderr (LOG_MODE=stdout), tagged per 
 Read them from the host, for example:
 
   docker logs -f <container> 2>&1                       # everything
-  docker logs <container> 2>&1 | grep '^\[nginx\]'      # one service: nginx, php-fpm, cron, supervisor, entrypoint
+  docker logs <container> 2>&1 | grep '^\[nginx\]'      # one service: nginx, php-fpm, cron, entrypoint
   docker logs <container> 2>&1 | grep -v '^\[nginx\]'   # everything except the access log
 
 With LOG_FORMAT=json each line is a JSON object with a "service" field:
@@ -34,9 +34,8 @@ case "$service" in
     nginx)      files=(/var/log/nginx/access.log /var/log/nginx/error.log) ;;
     php-fpm)    files=(/var/log/php-fpm/error.log /var/log/php-fpm/slow.log) ;;
     cron)       files=(/var/log/cron.log) ;;
-    supervisor) files=(/var/log/supervisord.log) ;;
-    all)        files=(/var/log/nginx/access.log /var/log/nginx/error.log /var/log/php-fpm/error.log /var/log/php-fpm/slow.log /var/log/cron.log /var/log/supervisord.log) ;;
-    *)          echo "Unknown service '$service'. Use: nginx, php-fpm, cron, supervisor or all." >&2; exit 1 ;;
+    all)        files=(/var/log/nginx/access.log /var/log/nginx/error.log /var/log/php-fpm/error.log /var/log/php-fpm/slow.log /var/log/cron.log) ;;
+    *)          echo "Unknown service '$service'. Use: nginx, php-fpm, cron or all." >&2; exit 1 ;;
 esac
 
 existing=()

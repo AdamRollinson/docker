@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Docker image build system that produces multi-architecture (amd64/arm64) PHP container images published to Docker Hub under `adamrollogi/`. Three layered images are built:
 
-1. **`adamrollogi/base:latest`** — Alpine 3.24 base with common tools and Supervisor
+1. **`adamrollogi/base:latest`** — Alpine 3.24 base with tini, cron and common tools
 2. **`adamrollogi/php:{version}`** — PHP CLI with Composer and extensions (builds on base)
 3. **`adamrollogi/php-nginx:{version}`** — PHP-FPM + Nginx web stack (builds on php)
 4. **`adamrollogi/php-nginx-dev:{version}`** — php-nginx plus Xdebug and development defaults (builds on php-nginx)
@@ -41,7 +41,7 @@ docker build --build-arg PHP_IMAGE_TAG=8.3 --build-arg PHP_VERSION=83 -t adamrol
 ### Image Inheritance Chain
 ```
 Alpine 3.24
-  └── base (supervisor, bash, curl, git, envsubst)
+  └── base (tini, cron, bash, curl, git, envsubst)
         └── php:{version} (PHP CLI, Composer, extensions, php.ini.template)
               └── php-nginx:{version} (Nginx, PHP-FPM, config templates)
                     └── php-nginx-dev:{version} (Xdebug, no-cache snippet, dev php defaults)
@@ -50,7 +50,7 @@ Alpine 3.24
 ### Configuration via Environment Variables
 All runtime configuration is done through environment variables substituted into templates at container startup via `envsubst` in entrypoint scripts. See `ENV.md` for the full variable reference.
 
-Generic overrides: any `php.<setting>` env var is appended to the rendered php.ini, `fpm.pool.<setting>` to the `[www]` pool and `fpm.global.<setting>` to the FPM `[global]` section, via `apply_ini_overrides` in `/usr/local/lib/entrypoint-lib.sh` (shipped by the php image, sourced by every entrypoint). Drop-in directories: `/etc/nginx/http-conf.d` (http block), `/etc/nginx/after.d` (inside the app server block), `/etc/nginx/http.d` (extra server blocks), plus `/run/nginx/after.d` for runtime-rendered snippets such as the dev image's no-cache location. Logging is organised per service: every long-running process is started through `/usr/local/bin/run-service <name> <cmd>` (base image), which uses bash process substitution plus busybox awk to prefix each stdout/stderr line with `[name]` (`LOG_FORMAT=text`) or wrap it as `{"time","service","stream","message"}` (`LOG_FORMAT=json`, JSON lines pass through untouched so nginx's `json_combined` access log stays structured). The entrypoints log through `log()` from `/usr/local/lib/entrypoint-lib.sh`, tagged `[entrypoint]`. `LOG_MODE=file` disables tagging and resolves the empty `NGINX_ACCESS_LOG`, `NGINX_ERROR_LOG`, `PHP_FPM_ERROR_LOG`, `PHP_FPM_SLOWLOG` defaults to per-service files under `/var/log`; `container-logs` tails them. The access log directive is assembled in the entrypoint as `NGINX_ACCESS_LOG_DIRECTIVE` (handles `off` and the json format), and `json_combined` is defined in `/run/nginx/logging.conf`, included at the top of the http block. supervisord's own messages stay untagged on stderr: wrapping supervisord would double-tag the program output it relays. IPv6 listeners are emitted by default and stripped with `sed` when `NGINX_LISTEN_IPV6=false`.
+Generic overrides: any `php.<setting>` env var is appended to the rendered php.ini, `fpm.pool.<setting>` to the `[www]` pool and `fpm.global.<setting>` to the FPM `[global]` section, via `apply_ini_overrides` in `/usr/local/lib/entrypoint-lib.sh` (shipped by the php image, sourced by every entrypoint). Drop-in directories: `/etc/nginx/http-conf.d` (http block), `/etc/nginx/after.d` (inside the app server block), `/etc/nginx/http.d` (extra server blocks), plus `/run/nginx/after.d` for runtime-rendered snippets such as the dev image's no-cache location. Logging is organised per service: every long-running process is started through `/usr/local/bin/run-service <name> <cmd>` (base image), which uses bash process substitution plus busybox awk to prefix each stdout/stderr line with `[name]` (`LOG_FORMAT=text`) or wrap it as `{"time","service","stream","message"}` (`LOG_FORMAT=json`, JSON lines pass through untouched so nginx's `json_combined` access log stays structured). The entrypoints log through `log()` from `/usr/local/lib/entrypoint-lib.sh`, tagged `[entrypoint]`. `LOG_MODE=file` disables tagging and resolves the empty `NGINX_ACCESS_LOG`, `NGINX_ERROR_LOG`, `PHP_FPM_ERROR_LOG`, `PHP_FPM_SLOWLOG` defaults to per-service files under `/var/log`; `container-logs` tails them. The access log directive is assembled in the entrypoint as `NGINX_ACCESS_LOG_DIRECTIVE` (handles `off` and the json format), and `json_combined` is defined in `/run/nginx/logging.conf`, included at the top of the http block. Every long-running process goes through `run-service`, so nothing is left untagged. IPv6 listeners are emitted by default and stripped with `sed` when `NGINX_LISTEN_IPV6=false`.
 
 Rendered config never lands in `/etc`. The php entrypoint writes `php.ini` to `/run/php` (PHP finds it via `PHPRC`); the php-nginx entrypoint writes `nginx.conf` plus server blocks to `/run/nginx` and the FPM pool plus a minimal `php-fpm.conf` to `/run/php`, then starts nginx with `-c` and php-fpm with `-y`/`-c`. Templates are shipped root-owned under `/usr/local/etc/{nginx,php}`. The stock `/etc/nginx/http.d/*.conf` include is kept so users can still mount extra server blocks there. This keeps `/etc` root-owned and makes the images work with `--read-only` plus tmpfs mounts on `/run`, `/tmp`, `/var/log` and `/var/lib/nginx`.
 
@@ -93,10 +93,7 @@ Key implementation details:
 - Alpine repositories are referenced over `https://`
 
 ### Process Management
-Supervisor manages all long-running processes inside containers:
-- **base**: runs cron
-- **php**: runs supervisord (inherits cron from base)
-- **php-nginx**: adds php-fpm and nginx (with `daemon off`) as supervised programs
+There is no supervisord (and therefore no Python) in the images since October 2026. The php-nginx entrypoint's `start_services` launches php-fpm and nginx, plus busybox `crond` when running as root, each via `run-service`, waits on them with `wait -n`, and exits with the first one to die so the orchestrator restarts the container. `CMD ["serve"]` triggers it; the old `supervisord` CMD is accepted for compatibility; any other command is exec'd. The php image's CMD is `php -v`. `[cron]` lines come from crond in root mode.
 
 ## CI/CD
 

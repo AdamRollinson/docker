@@ -31,17 +31,24 @@ free_port() {
         || echo $((20000 + RANDOM % 20000))
 }
 
-# Start a container, record it for cleanup, wait for /health on the given host port
+# Start a container, record it for cleanup, wait for /health and then for PHP-FPM to answer
+# (nginx comes up a moment before php-fpm, so /health alone is not proof that PHP is ready)
 start_web() {
     local port=$1; shift
     local cid
     cid=$(docker run -d --rm -p "127.0.0.1:${port}:8080" -e NGINX_PORT=8080 "$@")
     CONTAINERS+=("$cid")
     for _ in $(seq 1 40); do
-        curl -sf "http://127.0.0.1:${port}/health" >/dev/null 2>&1 && { echo "$cid"; return 0; }
+        curl -sf "http://127.0.0.1:${port}/health" >/dev/null 2>&1 && break
         sleep 0.5
     done
-    echo "container did not become healthy; logs:" >&2
+    for _ in $(seq 1 40); do
+        local code
+        code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${port}/")
+        [ "$code" = "200" ] && { echo "$cid"; return 0; }
+        sleep 0.5
+    done
+    echo "container did not become ready; last status $code; logs:" >&2
     docker logs "$cid" 2>&1 | tail -20 >&2
     return 1
 }
@@ -68,6 +75,8 @@ test_common() { # IMAGE  - checks shared by every image
     local uid
     uid=$(docker run --rm --entrypoint sh "$img" -c 'id -u')
     [ "$uid" != "0" ] && pass "default user is unprivileged (uid $uid)" || fail "default user is root"
+    docker run --rm --entrypoint sh "$img" -c '! command -v python3 >/dev/null && ! command -v supervisord >/dev/null' \
+        && pass "no python or supervisord in the image" || fail "python or supervisord present"
 }
 
 test_base() {
@@ -156,6 +165,8 @@ test_php_nginx() {
     CONTAINERS+=("$cid")
     for _ in $(seq 1 40); do curl -sf "http://127.0.0.1:${port}/health" >/dev/null 2>&1 && break; sleep 0.5; done
     curl -sf "http://127.0.0.1:${port}/health" >/dev/null && pass "root mode healthy on port 80" || fail "root mode failed" "$(docker logs "$cid" 2>&1 | tail -5)"
+    docker exec "$cid" sh -c 'ps -o user,args | grep -E "crond" | grep -v grep | grep -q root' && pass "crond running as root in root mode" || fail "crond not running in root mode"
+    docker exec "$cid" sh -c 'ps -o user,args | grep -E "nginx: worker" | grep -v grep | grep -q "^nginx"' && pass "nginx workers dropped to nginx user" || fail "nginx workers not running as nginx"
     docker rm -f "$cid" >/dev/null
 
     # HTTPS redirect does not reflect the Host header when a server name is set

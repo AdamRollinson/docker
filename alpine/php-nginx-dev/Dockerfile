@@ -53,5 +53,5 @@ USER appuser
 
 ENTRYPOINT ["/sbin/tini", "--", "php-nginx-dev-entrypoint.sh"]
 
-# Start Supervisord
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]
+# Same as php-nginx: "serve" runs the stack under the entrypoint's supervision
+CMD ["serve"]

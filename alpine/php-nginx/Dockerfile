@@ -83,8 +83,6 @@ LABEL org.opencontainers.image.title="adamrollogi/php-nginx" \
 # Copy configuration templates (root-owned; rendered into /run at startup) and entrypoint files
 COPY app.conf.template app-ssl.conf.template app-ssl-redirect.conf.template /usr/local/etc/nginx/
 COPY www.conf.template /usr/local/etc/php/www.conf.template
-COPY supervisord-fpm.conf /etc/supervisord.d/supervisord-fpm.conf
-COPY supervisord-nginx.conf /etc/supervisord.d/supervisord-nginx.conf
 COPY index.php /var/www/html/index.php
 COPY php-nginx-entrypoint.sh /usr/local/bin/
 COPY healthcheck.sh /usr/local/bin/
@@ -122,5 +120,6 @@ WORKDIR /var/www
 # Default to non-root user
 USER appuser
 
-# Start Supervisord
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]
+# "serve" starts php-fpm and nginx (plus crond when running as root) under the entrypoint's
+# own supervision; any other command is executed as-is
+CMD ["serve"]

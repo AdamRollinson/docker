@@ -164,5 +164,6 @@ USER appuser
 # Set the entrypoint
 ENTRYPOINT ["/sbin/tini", "--", "php-entrypoint.sh"]
 
-# Start Supervisord
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]
+# A CLI image: the default command just reports the PHP version. Pass your own command, or set
+# CLI_COMMAND to run a long-lived worker (see php-entrypoint.sh).
+CMD ["php", "-v"]

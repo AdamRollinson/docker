@@ -28,13 +28,5 @@ if [ -n "$OPCACHE_ERROR_LOG" ]; then
     chmod 666 "$OPCACHE_ERROR_LOG" 2>/dev/null || true
 fi
 
-# If non-root and CMD is supervisord, exit with guidance
-if [ "$(id -u)" != "0" ] && [[ "$*" == *supervisord* ]]; then
-    log "ERROR: supervisord requires root privileges."
-    log "  Run with: docker run --user root <image>"
-    log "  Or override CMD: docker run <image> php <your-script>"
-    exit 1
-fi
-
 # Run the original command
 exec "$@"

@@ -262,33 +262,47 @@ fi
 # Create log directories (best-effort for non-root; needed when /var/log is a tmpfs)
 mkdir -p /var/log/nginx "/var/log/php${PHP_VERSION}" /var/log/php-fpm /var/lib/nginx/tmp /var/lib/nginx/logs 2>/dev/null || true
 
-if [ "$(id -u)" = "0" ]; then
-    # Root mode: full supervisor with cron, nginx, php-fpm
-    exec "$@"
-else
-    # Non-root mode: run nginx + php-fpm directly (no supervisor/cron)
-    if [[ "$*" == *supervisord* ]]; then
-        log "INFO: Running as non-root (UID $(id -u)). Starting nginx + php-fpm directly."
-        log "INFO: Cron is not available in non-root mode. Use --user root for full supervisor mode."
+# ---------------------------------------------------------------------------
+# Process supervision
+# ---------------------------------------------------------------------------
+# "serve" (the image default) starts php-fpm and nginx, plus crond when running as root, each
+# through run-service so their log lines are tagged. The entrypoint waits on all of them and
+# exits with the first one to die, so the container restarts cleanly under any orchestrator.
+# The old supervisord CMD is accepted for backward compatibility.
 
-        # Start php-fpm in background (run-service tags its log lines per LOG_FORMAT/LOG_TAG)
-        run-service php-fpm /usr/sbin/php-fpm --nodaemonize -y "${PHP_RUN_DIR}/php-fpm.conf" -c "${PHP_RUN_DIR}/php.ini" &
-        PHP_FPM_PID=$!
+start_services() {
+    local pids=()
 
-        # Start nginx in foreground-ish
-        run-service nginx /usr/sbin/nginx -c "${NGINX_RUN_DIR}/nginx.conf" -g 'daemon off;' &
-        NGINX_PID=$!
+    run-service php-fpm /usr/sbin/php-fpm --nodaemonize -y "${PHP_RUN_DIR}/php-fpm.conf" -c "${PHP_RUN_DIR}/php.ini" &
+    pids+=($!)
 
-        # Trap signals for clean shutdown
-        trap 'kill -TERM $PHP_FPM_PID $NGINX_PID 2>/dev/null; wait' TERM INT
+    run-service nginx /usr/sbin/nginx -c "${NGINX_RUN_DIR}/nginx.conf" -g 'daemon off;' &
+    pids+=($!)
 
-        # Wait for either process to exit, then clean up
-        wait -n "$PHP_FPM_PID" "$NGINX_PID" 2>/dev/null
-        EXIT_CODE=$?
-        kill "$PHP_FPM_PID" "$NGINX_PID" 2>/dev/null
-        wait "$PHP_FPM_PID" "$NGINX_PID" 2>/dev/null
-        exit "${EXIT_CODE}"
+    if [ "$(id -u)" = "0" ]; then
+        log "INFO: Running as root. Starting php-fpm, nginx and crond."
+        run-service cron /usr/sbin/crond -f -l 8 -L /dev/stderr &
+        pids+=($!)
     else
-        exec "$@"
+        log "INFO: Running as non-root (UID $(id -u)). Starting php-fpm and nginx."
     fi
-fi
+
+    # Forward termination to every service, then wait for them to finish
+    trap 'kill -TERM "${pids[@]}" 2>/dev/null; wait' TERM INT
+
+    # Exit as soon as any service exits, propagating its status
+    wait -n "${pids[@]}" 2>/dev/null
+    local status=$?
+    kill -TERM "${pids[@]}" 2>/dev/null
+    wait "${pids[@]}" 2>/dev/null
+    exit "${status}"
+}
+
+case "${1:-serve}" in
+    serve|/usr/bin/supervisord|supervisord)
+        start_services
+        ;;
+    *)
+        exec "$@"
+        ;;
+esac
