@@ -13,7 +13,7 @@ Docker image build system that produces multi-architecture (amd64/arm64) PHP con
 
 Supported PHP versions: **8.2, 8.3, 8.4, 8.5**, plus **8.6** as a pre-release from Alpine edge/testing
 
-The exact release for each minor version is pinned in `alpine/php-versions.txt` (format: `<minor> <release>` per line). This file is the single source of truth for both `build.sh` and the CI matrix. `alpine/check-php-versions.sh` compares the pins with the Alpine edge APKINDEX for both architectures and shows the latest php.net release per branch so an upstream security fix that Alpine has not packaged yet is visible (`CHECK_UPSTREAM=false` skips the lookup); only Alpine availability drives `--update`, which rewrites the file. The `php-version-bump` workflow runs that script daily and commits the result.
+The exact release for each minor version is pinned in `alpine/php-versions.txt` (format: `<minor> <release>` per line). This file is the single source of truth for both `build.sh` and the CI matrix. `alpine/check-php-versions.sh` compares the pins with the Alpine edge APKINDEX for both architectures and shows the latest php.net release per branch so an upstream security fix that Alpine has not packaged yet is visible (`CHECK_UPSTREAM=false` skips the lookup); only Alpine availability drives `--update`, which rewrites the file. The `php-version-bump` workflow runs that script every four hours and commits the result.
 
 ## Build Commands
 
@@ -101,7 +101,7 @@ Supervisor manages all long-running processes inside containers:
 ## CI/CD
 
 ### Automatic PHP release bumps (`.github/workflows/php-version-bump.yml`)
-- **Triggers**: daily cron, manual `workflow_dispatch`
+- **Triggers**: cron every four hours (`17 */4 * * *`), manual `workflow_dispatch`
 - Runs `alpine/check-php-versions.sh --update`. A minor is only bumped when the same release exists in edge for both `x86_64` and `aarch64`
 - Commits the change to `main` as `github-actions[bot]`, then dispatches `docker-build.yml` with `gh workflow run` (pushes made with `GITHUB_TOKEN` do not trigger other workflows on their own)
 - Needs `contents: write` and `actions: write`, which the workflow requests itself
@@ -126,7 +126,7 @@ Supervisor manages all long-running processes inside containers:
 | `alpine/build.sh` | Local build script for all images |
 | `alpine/php-versions.txt` | Pinned PHP release per supported minor version |
 | `alpine/check-php-versions.sh` | Compares pins with Alpine edge, `--update` rewrites the file |
-| `.github/workflows/php-version-bump.yml` | Daily job that bumps pins and dispatches the build |
+| `.github/workflows/php-version-bump.yml` | Four-hourly job that bumps pins and dispatches the build |
 | `alpine/base/Dockerfile` | Base Alpine image with common tooling |
 | `alpine/php/Dockerfile` | PHP image with extensions and Composer |
 | `alpine/php/php.ini.template` | Runtime PHP configuration template |

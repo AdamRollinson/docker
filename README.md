@@ -295,7 +295,7 @@ This builds all 16 images sequentially: base, php (x5 versions), php-nginx (x5 v
 
 The exact PHP release for each minor version lives in [`alpine/php-versions.txt`](alpine/php-versions.txt). Both `build.sh` and the CI workflow read it, pass the release to the Dockerfiles as `PHP_PATCH_VERSION`, and install the Alpine package with a version constraint (`php84~8.4.26`). A build fails if Alpine edge no longer carries that release, rather than silently shipping a different PHP.
 
-New releases are picked up automatically. The `php-version-bump` workflow runs daily, compares the pins against the Alpine edge package index for both amd64 and arm64, and when a newer release is available on both it commits the bump to `main` and dispatches the build workflow. Alpine edge usually lags php.net by a few days, so a release announced today typically ships within the week.
+New releases are picked up automatically. The `php-version-bump` workflow runs every four hours, compares the pins against the Alpine edge package index for both amd64 and arm64, and when a newer release is available on both it commits the bump to `main` and dispatches the build workflow. Alpine edge usually lags php.net by a few days, so a release announced today typically ships within the week, and within four hours of Alpine packaging it.
 
 To check or bump manually:
 
