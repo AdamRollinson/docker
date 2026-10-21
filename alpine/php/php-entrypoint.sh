@@ -28,5 +28,17 @@ if [ -n "$OPCACHE_ERROR_LOG" ]; then
     chmod 666 "$OPCACHE_ERROR_LOG" 2>/dev/null || true
 fi
 
+# "cron" runs the configured cron jobs (CRON_COMMAND or CRONTAB_FILE) as the only process,
+# for a dedicated scheduler container. Everything else is executed as given.
+if [ "${1:-}" = "cron" ]; then
+    crontab=$(render_crontab) || exit 1
+    if [ -z "$crontab" ]; then
+        log "ERROR: no cron jobs configured. Set CRON_SCHEDULE and CRON_COMMAND, or mount a crontab at ${CRONTAB_FILE:-/etc/crontabs/app}."
+        exit 1
+    fi
+    log "INFO: Starting cron with $(grep -c . "$crontab") job(s)."
+    exec run-service cron supercronic -passthrough-logs -quiet -no-reap "$crontab"
+fi
+
 # Run the original command
 exec "$@"

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Docker image build system that produces multi-architecture (amd64/arm64) PHP container images published to Docker Hub under `adamrollogi/`. Three layered images are built:
 
-1. **`adamrollogi/base:latest`** — Alpine 3.24 base with tini, cron and common tools
+1. **`adamrollogi/base:latest`** — Alpine 3.24 base with tini, supercronic and common tools
 2. **`adamrollogi/php:{version}`** — PHP CLI with Composer and extensions (builds on base)
 3. **`adamrollogi/php-nginx:{version}`** — PHP-FPM + Nginx web stack (builds on php)
 4. **`adamrollogi/php-nginx-dev:{version}`** — php-nginx plus Xdebug and development defaults (builds on php-nginx)
@@ -41,7 +41,7 @@ docker build --build-arg PHP_IMAGE_TAG=8.3 --build-arg PHP_VERSION=83 -t adamrol
 ### Image Inheritance Chain
 ```
 Alpine 3.24
-  └── base (tini, cron, bash, curl, git, envsubst)
+  └── base (tini, supercronic, bash, curl, git, envsubst)
         └── php:{version} (PHP CLI, Composer, extensions, php.ini.template)
               └── php-nginx:{version} (Nginx, PHP-FPM, config templates)
                     └── php-nginx-dev:{version} (Xdebug, no-cache snippet, dev php defaults)
@@ -93,7 +93,7 @@ Key implementation details:
 - Alpine repositories are referenced over `https://`
 
 ### Process Management
-There is no supervisord (and therefore no Python) in the images since October 2026. The php-nginx entrypoint's `start_services` launches php-fpm and nginx, plus busybox `crond` when running as root, each via `run-service`, waits on them with `wait -n`, and exits with the first one to die so the orchestrator restarts the container. `CMD ["serve"]` triggers it; the old `supervisord` CMD is accepted for compatibility; any other command is exec'd. The php image's CMD is `php -v`. `[cron]` lines come from crond in root mode.
+There is no supervisord (and therefore no Python) in the images since October 2026. The php-nginx entrypoint's `start_services` launches php-fpm and nginx, plus supercronic when cron jobs are configured, each via `run-service`, waits on them with `wait -n`, and exits with the first one to die so the orchestrator restarts the container. `CMD ["serve"]` triggers it; the old `supervisord` CMD is accepted for compatibility; any other command is exec'd. The php image's CMD is `php -v`. Cron is supercronic in every mode (works as any user): `render_crontab` in `entrypoint-lib.sh` builds `/run/cron/crontab` from `CRON_SCHEDULE`/`CRON_COMMAND` and/or the file at `CRONTAB_FILE` (default `/etc/crontabs/app`), validates it with `supercronic -test`, and the php image's `cron` command runs it standalone. Output is tagged `[cron]`. busybox crond is not used.
 
 ## CI/CD
 

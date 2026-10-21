@@ -25,6 +25,7 @@ RUN apk upgrade --no-cache && \
     shadow \
     gcompat \
     gettext-envsubst \
+    supercronic \
     tini && \
     # Remove setuid/setgid bits: nothing in these images needs privilege escalation helpers
     find / -xdev -type f -perm /6000 -exec chmod a-s {} + && \
@@ -35,7 +36,7 @@ RUN apk upgrade --no-cache && \
 
 # OCI metadata labels
 LABEL org.opencontainers.image.title="adamrollogi/base" \
-      org.opencontainers.image.description="Alpine 3.24 base with tini, cron and common tools" \
+      org.opencontainers.image.description="Alpine 3.24 base with tini, supercronic and common tools" \
       org.opencontainers.image.source="https://github.com/adamrollogi/docker" \
       org.opencontainers.image.licenses="MIT"
 
@@ -52,8 +53,8 @@ RUN addgroup -g "${APP_GID}" -S appuser && \
 # Set working directory
 WORKDIR /app
 
-# Set ownership of working directory
-RUN chown appuser:appuser /app
+# Set ownership of working directory and the runtime directory for the rendered crontab
+RUN mkdir -p /run/cron && chown appuser:appuser /app /run/cron
 
 # Shared entrypoint helpers and the service wrapper that tags log lines per service
 COPY --chown=root:root entrypoint-lib.sh /usr/local/lib/entrypoint-lib.sh

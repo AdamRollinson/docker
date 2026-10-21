@@ -8,6 +8,11 @@
 - **`LOG_TAG`**: `true` (default) adds the `[service]` prefixes in text mode; `false` leaves lines untouched. Ignored in json and file modes.
 - Services are launched through `/usr/local/bin/run-service <name> <command>`, which implements the tagging; `container-logs [-f] [service|all]` tails the per-service files in file mode.
 
+### Cron
+- **`CRON_SCHEDULE`**: Schedule for the single job defined by `CRON_COMMAND`. Default `* * * * *` (every minute). Standard five fields, or seven with leading seconds and trailing year.
+- **`CRON_COMMAND`**: Command to run on `CRON_SCHEDULE`. When set, supercronic is started alongside the web services (php-nginx) or by the `cron` command (php image).
+- **`CRONTAB_FILE`**: Path of a mounted crontab with any number of jobs. Default `/etc/crontabs/app`. Used in addition to `CRON_COMMAND` when both exist.
+
 ## `alpine/php/Dockerfile`
 
 ### PHP General Settings

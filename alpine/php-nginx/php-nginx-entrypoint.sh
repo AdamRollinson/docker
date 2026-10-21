@@ -265,9 +265,10 @@ mkdir -p /var/log/nginx "/var/log/php${PHP_VERSION}" /var/log/php-fpm /var/lib/n
 # ---------------------------------------------------------------------------
 # Process supervision
 # ---------------------------------------------------------------------------
-# "serve" (the image default) starts php-fpm and nginx, plus crond when running as root, each
-# through run-service so their log lines are tagged. The entrypoint waits on all of them and
-# exits with the first one to die, so the container restarts cleanly under any orchestrator.
+# "serve" (the image default) starts php-fpm and nginx, plus supercronic when cron jobs are
+# configured (CRON_COMMAND or a crontab at CRONTAB_FILE), each through run-service so their log
+# lines are tagged. The entrypoint waits on all of them and exits with the first one to die, so
+# the container restarts cleanly under any orchestrator. Cron works as any user; no root needed.
 # The old supervisord CMD is accepted for backward compatibility.
 
 start_services() {
@@ -279,12 +280,14 @@ start_services() {
     run-service nginx /usr/sbin/nginx -c "${NGINX_RUN_DIR}/nginx.conf" -g 'daemon off;' &
     pids+=($!)
 
-    if [ "$(id -u)" = "0" ]; then
-        log "INFO: Running as root. Starting php-fpm, nginx and crond."
-        run-service cron /usr/sbin/crond -f -l 8 -L /dev/stderr &
+    local crontab
+    crontab=$(render_crontab) || exit 1
+    if [ -n "$crontab" ]; then
+        run-service cron supercronic -passthrough-logs -quiet -no-reap "$crontab" &
         pids+=($!)
+        log "INFO: Running as UID $(id -u). Starting php-fpm, nginx and cron ($(grep -c . "$crontab") job(s))."
     else
-        log "INFO: Running as non-root (UID $(id -u)). Starting php-fpm and nginx."
+        log "INFO: Running as UID $(id -u). Starting php-fpm and nginx."
     fi
 
     # Forward termination to every service, then wait for them to finish

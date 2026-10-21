@@ -8,7 +8,7 @@ Full documentation: https://docker.rollogi.co.uk (source in `docs/`). This READM
 
 | Image | Description |
 |-------|-------------|
-| `adamrollogi/base:latest` | Alpine 3.24 base with tini, cron, bash, curl, git |
+| `adamrollogi/base:latest` | Alpine 3.24 base with tini, supercronic, bash, curl, git |
 | `adamrollogi/php:{version}` | PHP CLI with Composer and common extensions |
 | `adamrollogi/php-nginx:{version}` | PHP-FPM + Nginx web stack with optional HTTPS |
 | `adamrollogi/php-nginx-dev:{version}` | php-nginx plus Xdebug, visible errors and uncached assets, for local development |
@@ -23,7 +23,7 @@ Each image is published under two tags: the minor version (`php:8.4`, tracks the
 
 ```
 Alpine 3.24
-  └── base (tini, cron, bash, curl, git, envsubst)
+  └── base (tini, supercronic, bash, curl, git, envsubst)
         └── php:{version} (PHP CLI, Composer, extensions)
               └── php-nginx:{version} (Nginx, PHP-FPM, SSL support)
                     └── php-nginx-dev:{version} (Xdebug, dev defaults)
@@ -74,10 +74,27 @@ docker run --rm -d -p 80:80 -p 443:443 --user root \
 All images default to running as `appuser` (UID 1000). When running as non-root:
 
 - Ports below 1024 (80, 443) are unavailable — use `8080`, `8443`, etc.
-- Cron is not available — use `--user root`, which also starts crond
 - PHP-FPM runs without `user`/`group` directives (automatically stripped)
 
-Use `--user root` when you need privileged ports or cron.
+Use `--user root` when you need privileged ports.
+
+### Cron
+
+Cron runs as the unprivileged user through [supercronic](https://github.com/aptible/supercronic), with job output in the container log tagged `[cron]`. Either set a single job:
+
+```bash
+docker run --rm -d -p 8080:8080 -e NGINX_PORT=8080 \
+  -e CRON_SCHEDULE="* * * * *" \
+  -e CRON_COMMAND="php /var/www/html/artisan schedule:run" \
+  -v $(pwd):/var/www/html \
+  adamrollogi/php-nginx:8.4
+```
+
+or mount a full crontab at `/etc/crontabs/app` (override the path with `CRONTAB_FILE`). Both can be combined. Schedules accept the standard five fields, or seven with leading seconds and trailing year. For a dedicated scheduler container, run the CLI image with the `cron` command:
+
+```bash
+docker run --rm -d -e CRON_SCHEDULE="* * * * *" -e CRON_COMMAND="php /app/artisan schedule:run" -v $(pwd):/app adamrollogi/php:8.4 cron
+```
 
 ### Matching your host user
 

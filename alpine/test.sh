@@ -111,6 +111,12 @@ test_php() {
     noise=$(docker run --rm -e "php.memory_limit=321M" "$img" php -r 'echo "x";' 2>/dev/null)
     [ "$noise" = "x" ] && pass "entrypoint keeps stdout clean for CLI output" || fail "entrypoint wrote to stdout: '$noise'"
     docker run --rm "$img" php --ini 2>/dev/null | grep -q "/run/php/php.ini" && pass "php.ini loaded from /run/php" || fail "php.ini not loaded from /run/php"
+    local cid
+    cid=$(docker run -d --rm -e CRON_SCHEDULE='*/1 * * * * * *' -e CRON_COMMAND='echo cli-cron-tick' "$img" cron)
+    CONTAINERS+=("$cid")
+    sleep 4
+    docker logs "$cid" 2>&1 | grep -q '^\[cron\] cli-cron-tick' && pass "cron command runs a scheduler container" || fail "cron command did not run jobs" "$(docker logs "$cid" 2>&1 | tail -5)"
+    docker rm -f "$cid" >/dev/null
 }
 
 test_php_nginx() {
@@ -165,9 +171,20 @@ test_php_nginx() {
     CONTAINERS+=("$cid")
     for _ in $(seq 1 40); do curl -sf "http://127.0.0.1:${port}/health" >/dev/null 2>&1 && break; sleep 0.5; done
     curl -sf "http://127.0.0.1:${port}/health" >/dev/null && pass "root mode healthy on port 80" || fail "root mode failed" "$(docker logs "$cid" 2>&1 | tail -5)"
-    docker exec "$cid" sh -c 'ps -o user,args | grep -E "crond" | grep -v grep | grep -q root' && pass "crond running as root in root mode" || fail "crond not running in root mode"
     docker exec "$cid" sh -c 'ps -o user,args | grep -E "nginx: worker" | grep -v grep | grep -q "^nginx"' && pass "nginx workers dropped to nginx user" || fail "nginx workers not running as nginx"
     docker rm -f "$cid" >/dev/null
+
+    # cron as non-root via supercronic (7-field schedule = seconds granularity)
+    port=$(free_port)
+    cid=$(docker run -d --rm -p "127.0.0.1:${port}:8080" -e NGINX_PORT=8080 -e CRON_SCHEDULE='*/1 * * * * * *' -e CRON_COMMAND='echo cron-tick' "$img")
+    CONTAINERS+=("$cid")
+    sleep 4
+    docker logs "$cid" 2>&1 | grep -q '^\[cron\] cron-tick' && pass "cron job runs as non-root with tagged output" || fail "cron job did not run" "$(docker logs "$cid" 2>&1 | tail -5)"
+    docker rm -f "$cid" >/dev/null
+    cid=$(docker run -d --rm -e NGINX_PORT=8080 -e CRON_SCHEDULE='not a schedule' -e CRON_COMMAND='true' "$img")
+    CONTAINERS+=("$cid")
+    sleep 3
+    docker inspect "$cid" >/dev/null 2>&1 && fail "container kept running with an invalid crontab" || pass "invalid crontab fails fast"
 
     # HTTPS redirect does not reflect the Host header when a server name is set
     port=$(free_port)
