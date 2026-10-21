@@ -99,6 +99,9 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
 
+      - name: Smoke test Base Image candidate
+        run: alpine/test.sh base ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}:${{ env.CANDIDATE_TAG }}
+
       - name: Attach VEX attestation to Base Image candidate
         uses: docker/scout-action@221e7f4860634eeb1579e3bd7ca232e577bd1864 # v1.26.0
         with:
@@ -184,6 +187,9 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
 
+      - name: Smoke test PHP Image (${{ matrix.minor }}) candidate
+        run: alpine/test.sh php ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }} ${{ matrix.patch }}
+
       - name: Attach VEX attestation to PHP Image (${{ matrix.minor }}) candidate
         uses: docker/scout-action@221e7f4860634eeb1579e3bd7ca232e577bd1864 # v1.26.0
         with:
@@ -226,6 +232,9 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
 
+      - name: Smoke test PHP-NGINX Image (${{ matrix.minor }}) candidate
+        run: alpine/test.sh php-nginx ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }} ${{ matrix.patch }}
+
       - name: Attach VEX attestation to PHP-NGINX Image (${{ matrix.minor }}) candidate
         uses: docker/scout-action@221e7f4860634eeb1579e3bd7ca232e577bd1864 # v1.26.0
         with:
@@ -267,6 +276,9 @@ jobs:
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           ignore-unfixed: true
+
+      - name: Smoke test PHP-NGINX-DEV Image (${{ matrix.minor }}) candidate
+        run: alpine/test.sh php-nginx-dev ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }} ${{ matrix.patch }}
 
       - name: Attach VEX attestation to PHP-NGINX-DEV Image (${{ matrix.minor }}) candidate
         uses: docker/scout-action@221e7f4860634eeb1579e3bd7ca232e577bd1864 # v1.26.0

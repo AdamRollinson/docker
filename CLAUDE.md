@@ -108,7 +108,7 @@ Supervisor manages all long-running processes inside containers:
 
 ### Image build (`.github/workflows/docker-build.yml`)
 - **Triggers**: push to `main` (ignoring `docs/**`, Markdown, `LICENSE`, `docs-ci.yml` and `dependabot.yml`, so documentation changes never rebuild images), manual `workflow_dispatch`, weekly cron (so Alpine fixes ship without a code change)
-- **Scan before publish**: every image is pushed as `:candidate-<sha>[-<minor>]`, Trivy-scanned and VEX-attested, then promoted to its real tags with `docker buildx imagetools create`. Candidate tags are deleted via the Docker Hub API afterwards (best effort)
+- **Scan and test before publish**: every image is pushed as `:candidate-<sha>[-<minor>]`, Trivy-scanned, smoke-tested with `alpine/test.sh` (health endpoint, PHP version, extensions, package consistency, no setuid files, tagged logs, read-only recipe, root mode, redirect host, Xdebug toggle) and VEX-attested, then promoted to its real tags with `docker buildx imagetools create`. Candidate tags are deleted via the Docker Hub API afterwards (best effort)
 - `DOCKER_PAT` is only exposed to the login and candidate-cleanup steps, never at workflow scope
 - Buildx is pinned to a mainline release via `BUILDX_VERSION`. Dependabot covers both GitHub Actions and the `alpine/base` Docker digest
 - **Build strategy**: a `php-matrix` job turns `alpine/php-versions.txt` into a matrix (`minor`/`patch`), base image builds first, then PHP versions in parallel
@@ -130,6 +130,7 @@ A Nuxt 4 site built from the Nuxt UI docs template with `@nuxt/ui`, `@nuxt/conte
 | `alpine/build.sh` | Local build script for all images |
 | `alpine/php-versions.txt` | Pinned PHP release per supported minor version |
 | `alpine/check-php-versions.sh` | Compares pins with the Alpine repositories apk uses, `--update` rewrites the file |
+| `alpine/test.sh` | Smoke tests run by CI against each candidate image; `test.sh all 8.4` runs everything against local images |
 | `.github/workflows/php-version-bump.yml` | Four-hourly job that bumps pins and dispatches the build |
 | `alpine/base/Dockerfile` | Base Alpine image with common tooling |
 | `alpine/php/Dockerfile` | PHP image with extensions and Composer |

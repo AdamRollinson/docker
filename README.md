@@ -312,6 +312,15 @@ alpine/check-php-versions.sh --update
 
 You can also trigger the bump workflow from the Actions tab via "Run workflow".
 
+### Test the images
+
+```bash
+alpine/test.sh all 8.4        # every check against the local adamrollogi/*:8.4 images
+alpine/test.sh php-nginx adamrollogi/php-nginx:8.4 8.4.27
+```
+
+CI runs the same script against every candidate image before it is promoted, so a regression in health checks, extensions, package consistency, hardening or logging blocks the publish.
+
 ### Build a single image
 
 ```bash

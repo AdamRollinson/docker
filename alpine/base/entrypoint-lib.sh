@@ -14,14 +14,16 @@ json_escape() {
 
 # Log a line from the entrypoint, tagged like the service streams:
 #   text: "[entrypoint] INFO: ..."   json: {"time":...,"service":"entrypoint","message":"..."}
+# Always written to stderr so that stdout of a CLI command (docker run ... php -r ... | jq)
+# stays clean.
 log() {
     if [ "${LOG_MODE:-stdout}" = "stdout" ] && [ "${LOG_FORMAT:-text}" = "json" ]; then
-        printf '{"time":"%s","service":"entrypoint","stream":"stdout","message":"%s"}\n' \
-            "$(date +%Y-%m-%dT%H:%M:%S%z)" "$(json_escape "$*")"
+        printf '{"time":"%s","service":"entrypoint","stream":"stderr","message":"%s"}\n' \
+            "$(date +%Y-%m-%dT%H:%M:%S%z)" "$(json_escape "$*")" >&2
     elif [ "${LOG_MODE:-stdout}" = "stdout" ] && [ "${LOG_TAG:-true}" = "true" ]; then
-        echo "[entrypoint] $*"
+        echo "[entrypoint] $*" >&2
     else
-        echo "$*"
+        echo "$*" >&2
     fi
 }
 
