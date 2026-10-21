@@ -1,4 +1,6 @@
-# Served by Cloudflare Workers static assets. All matching rules are merged, so the generic
+# Served by Cloudflare Workers static assets. The CSP allows Cloudflare Web Analytics, which the
+# edge injects into HTML (static.cloudflareinsights.com script, cloudflareinsights.com beacon).
+# All matching rules are merged, so the generic
 # rule comes first and the hashed-asset rules detach its Cache-Control with "!" before
 # setting their own. Pages and text endpoints revalidate on every request so a deploy is
 # visible immediately (the edge answers with 304s); content-addressed assets cache for a year.
@@ -10,7 +12,7 @@
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: geolocation=(), microphone=(), camera=()
   Cross-Origin-Opener-Policy: same-origin
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; worker-src 'self' blob:; frame-ancestors 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; upgrade-insecure-requests
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; worker-src 'self' blob:; frame-ancestors 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; upgrade-insecure-requests
 
 /_nuxt/*
   ! Cache-Control

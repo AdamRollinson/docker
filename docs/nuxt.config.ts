@@ -62,6 +62,20 @@ export default defineNuxtConfig({
     }
   },
 
+  // Bundle every icon at build time and never call the Iconify API at runtime. The default
+  // scan only covers app/, so content/ frontmatter icons were fetched remotely and blocked by
+  // the Content-Security-Policy in production.
+  icon: {
+    provider: 'none',
+    clientBundle: {
+      scan: {
+        globInclude: ['**/*.{vue,jsx,tsx,md,mdc,mdx,yml,yaml,ts}', '../content/**/*.{md,yml,yaml}'],
+        globExclude: ['node_modules', 'dist', '.nuxt', '.output']
+      },
+      sizeLimitKb: 512
+    }
+  },
+
   llms: {
     domain: siteUrl,
     title: 'Rollogi Docker Images',
