@@ -105,6 +105,8 @@ All SSL settings are opt-in. When `NGINX_SSL_ENABLED` is `false` (the default), 
 - **`NGINX_SSL_SESSION_CACHE`**: SSL session cache configuration. Default is `shared:SSL:10m`.
 - **`NGINX_SSL_REDIRECT`**: Whether to redirect HTTP requests to HTTPS when SSL is enabled. Default is `true`.
 - **`NGINX_SSL_REDIRECT_PORT`**: Port for the HTTP-to-HTTPS redirect listener. Defaults to the value of `NGINX_PORT`.
+- **`NGINX_METRICS_PORT`**: When set, nginx opens an extra listener on this port serving `/nginx_status` (stub_status), `/fpm-status`, `/fpm-ping` and `/health`. Empty (disabled) by default. Never exposed on the application port.
+- **`NGINX_METRICS_ALLOW`**: Address or CIDR allowed to reach the metrics listener (`allow` directive). Default `all`.
 - **`NGINX_LISTEN_IPV6`**: Adds `listen [::]:<port>` alongside the IPv4 listener. Default is `true`; set `false` on hosts where IPv6 is disabled in the kernel.
 - **`NGINX_ACCESS_LOG`**: Access log destination. Empty by default, which resolves to `/dev/stdout` or `/var/log/nginx/access.log` when `LOG_MODE=file`. Use `off` to disable.
 - **`NGINX_ERROR_LOG`**: Error log destination for both the `http` block and the app server. Empty by default, which resolves to `/dev/stderr` or `/var/log/nginx/error.log` when `LOG_MODE=file`.

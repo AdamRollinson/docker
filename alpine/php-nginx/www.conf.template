@@ -37,6 +37,12 @@ decorate_workers_output = no
 clear_env = no
 security.limit_extensions = .php
 
+; Status and ping endpoints. Only reachable through the metrics listener (NGINX_METRICS_PORT);
+; the application server block never routes these paths to FPM.
+pm.status_path = /fpm-status
+ping.path = /fpm-ping
+ping.response = pong
+
 ; Adjust slowlog settings for debugging long requests
 slowlog = ${PHP_FPM_SLOWLOG}
 request_slowlog_timeout = 5s

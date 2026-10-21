@@ -87,6 +87,7 @@ Key implementation details:
 - `healthcheck.sh` wrapper detects SSL mode and always checks `/health`, never a PHP page
 - The HTTP-to-HTTPS redirect target is fixed by the entrypoint: `NGINX_SSL_REDIRECT_HOST`, else the first non-wildcard `NGINX_SERVER_NAME`, else `$host` with a startup warning (Host header reflection would otherwise be an open redirect)
 - `/.well-known/` is served (not denied as a hidden path) in all templates so ACME HTTP-01 works, including on the redirect listener
+- `NGINX_METRICS_PORT` renders `metrics.conf.template` into `/run/nginx/http.d/metrics.conf`: a separate server block with `stub_status` at `/nginx_status`, FPM `pm.status_path` at `/fpm-status` and `ping.path` at `/fpm-ping` (both always configured in the pool but only routed by this listener), guarded by `allow ${NGINX_METRICS_ALLOW}; deny all;`
 
 ### Hardening conventions
 - No setuid/setgid binaries: every Dockerfile ends its package step with `find / -xdev -type f -perm /6000 -exec chmod a-s {} +`, and `busybox-suid` is not installed

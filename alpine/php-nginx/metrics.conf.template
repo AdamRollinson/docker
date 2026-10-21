@@ -1,0 +1,38 @@
+# Internal metrics listener, enabled by NGINX_METRICS_PORT. Expose it to your monitoring
+# network only; it is meant for nginx-prometheus-exporter, php-fpm_exporter or direct scraping.
+server {
+    listen ${NGINX_METRICS_PORT};
+    listen [::]:${NGINX_METRICS_PORT};
+    server_name _;
+    access_log off;
+    server_tokens off;
+
+    allow ${NGINX_METRICS_ALLOW};
+    deny all;
+
+    location = /health {
+        default_type text/plain;
+        return 200 "OK\n";
+    }
+
+    # nginx connection and request counters
+    location = /nginx_status {
+        stub_status;
+    }
+
+    # PHP-FPM pool status (append ?json, ?xml or ?full)
+    location = /fpm-status {
+        include /etc/nginx/fastcgi_params;
+        fastcgi_pass ${NGINX_FASTCGI_PASS};
+        fastcgi_param SCRIPT_NAME /fpm-status;
+        fastcgi_param SCRIPT_FILENAME /fpm-status;
+    }
+
+    # PHP-FPM liveness
+    location = /fpm-ping {
+        include /etc/nginx/fastcgi_params;
+        fastcgi_pass ${NGINX_FASTCGI_PASS};
+        fastcgi_param SCRIPT_NAME /fpm-ping;
+        fastcgi_param SCRIPT_FILENAME /fpm-ping;
+    }
+}

@@ -214,6 +214,20 @@ test_php_nginx() {
     docker exec "$cid" sh -c 'ps -o user,args | grep -E "nginx: worker" | grep -v grep | grep -q "^nginx"' && pass "nginx workers dropped to nginx user" || fail "nginx workers not running as nginx"
     docker rm -f "$cid" >/dev/null
 
+    # metrics listener on its own port, absent from the app port
+    port=$(free_port); local mport; mport=$(free_port)
+    cid=$(docker run -d --rm -p "127.0.0.1:${port}:8080" -p "127.0.0.1:${mport}:9090" -e NGINX_PORT=8080 -e NGINX_METRICS_PORT=9090 "$img")
+    CONTAINERS+=("$cid")
+    for _ in $(seq 1 40); do curl -sf "http://127.0.0.1:${port}/health" >/dev/null 2>&1 && break; sleep 0.5; done
+    curl -s "http://127.0.0.1:${mport}/nginx_status" | grep -q "Active connections" && pass "nginx stub_status on the metrics port" || fail "nginx_status missing" "$(curl -s "http://127.0.0.1:${mport}/nginx_status" | head -3)"
+    curl -s "http://127.0.0.1:${mport}/fpm-status" | grep -q "^pool:" && pass "php-fpm status on the metrics port" || fail "fpm-status missing" "$(curl -s "http://127.0.0.1:${mport}/fpm-status" | head -3)"
+    [ "$(curl -s "http://127.0.0.1:${mport}/fpm-ping")" = "pong" ] && pass "php-fpm ping answers pong" || fail "fpm-ping did not answer pong"
+    curl -s "http://127.0.0.1:${port}/nginx_status" | grep -q "Active connections" && fail "nginx_status exposed on the application port"
+    curl -s "http://127.0.0.1:${port}/fpm-status" | grep -q "^pool:" && fail "fpm-status exposed on the application port"
+    [ "$(curl -s "http://127.0.0.1:${port}/fpm-ping")" != "pong" ] || fail "fpm-ping exposed on the application port"
+    pass "status endpoints are not served on the application port"
+    docker rm -f "$cid" >/dev/null
+
     # cron as non-root via supercronic (7-field schedule = seconds granularity)
     port=$(free_port)
     cid=$(docker run -d --rm -p "127.0.0.1:${port}:8080" -e NGINX_PORT=8080 -e CRON_SCHEDULE='*/1 * * * * * *' -e CRON_COMMAND='echo cron-tick' "$img")

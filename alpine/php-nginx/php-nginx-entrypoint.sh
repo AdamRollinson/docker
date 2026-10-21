@@ -204,6 +204,13 @@ else
     sed -i 's/@@/$/g' "${NGINX_RUN_DIR}/http.d/app.conf"
 fi
 
+# Optional metrics listener with nginx stub_status and PHP-FPM status/ping
+if [ -n "${NGINX_METRICS_PORT}" ]; then
+    envsubst < "${NGINX_TEMPLATE_DIR}/metrics.conf.template" > "${NGINX_RUN_DIR}/http.d/metrics.conf"
+    sed -i 's/@@/$/g' "${NGINX_RUN_DIR}/http.d/metrics.conf"
+    log "INFO: Metrics listener on port ${NGINX_METRICS_PORT} (allow ${NGINX_METRICS_ALLOW}): /nginx_status, /fpm-status, /fpm-ping, /health."
+fi
+
 # Drop the IPv6 listeners when disabled (e.g. hosts with net.ipv6.conf.all.disable_ipv6=1)
 if [ "${NGINX_LISTEN_IPV6}" != "true" ]; then
     sed -i '/listen \[::\]/d' "${NGINX_RUN_DIR}"/http.d/*.conf

@@ -18,6 +18,8 @@ ENV NGINX_PORT=80 \
     NGINX_ACCESS_LOG="" \
     NGINX_ERROR_LOG="" \
     NGINX_FASTCGI_PASS=127.0.0.1:9000 \
+    NGINX_METRICS_PORT="" \
+    NGINX_METRICS_ALLOW=all \
     NGINX_DOCUMENT_ROOT=/var/www/html \
     NGINX_SSL_ENABLED=false \
     NGINX_SSL_PORT=443 \
@@ -81,7 +83,7 @@ LABEL org.opencontainers.image.title="adamrollogi/php-nginx" \
       org.opencontainers.image.licenses="MIT"
 
 # Copy configuration templates (root-owned; rendered into /run at startup) and entrypoint files
-COPY app.conf.template app-ssl.conf.template app-ssl-redirect.conf.template /usr/local/etc/nginx/
+COPY app.conf.template app-ssl.conf.template app-ssl-redirect.conf.template metrics.conf.template /usr/local/etc/nginx/
 COPY www.conf.template /usr/local/etc/php/www.conf.template
 COPY index.php /var/www/html/index.php
 COPY php-nginx-entrypoint.sh /usr/local/bin/

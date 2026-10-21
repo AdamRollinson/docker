@@ -78,6 +78,19 @@ All images default to running as `appuser` (UID 1000). When running as non-root:
 
 Use `--user root` when you need privileged ports.
 
+### Metrics
+
+Set `NGINX_METRICS_PORT` to open a second listener with the endpoints exporters expect. It is never served on the application port.
+
+```bash
+docker run --rm -d -p 8080:8080 -p 127.0.0.1:9090:9090 -e NGINX_PORT=8080 -e NGINX_METRICS_PORT=9090 adamrollogi/php-nginx:8.4
+curl -s localhost:9090/nginx_status     # nginx stub_status
+curl -s localhost:9090/fpm-status?json  # PHP-FPM pool status (also ?full)
+curl -s localhost:9090/fpm-ping         # pong
+```
+
+Point `nginx-prometheus-exporter` and `php-fpm_exporter` at those URLs, or restrict access with `NGINX_METRICS_ALLOW` (a CIDR or address, default `all`) and publish the port only on your monitoring network.
+
 ### Sending mail
 
 There is no mail server in the images. Point them at one and `mail()`, Laravel's `sendmail` transport and anything else that shells out to sendmail relay through SMTP via msmtp:
