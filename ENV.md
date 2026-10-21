@@ -8,6 +8,13 @@
 - **`LOG_TAG`**: `true` (default) adds the `[service]` prefixes in text mode; `false` leaves lines untouched. Ignored in json and file modes.
 - Services are launched through `/usr/local/bin/run-service <name> <command>`, which implements the tagging; `container-logs [-f] [service|all]` tails the per-service files in file mode.
 
+### Mail relay
+- **`SMTP_HOST`**: SMTP server to relay through. When set, the entrypoint renders `/run/php/msmtprc` and sets `sendmail_path` to msmtp (unless `PHP_SENDMAIL_PATH` is given).
+- **`SMTP_PORT`**: Default `587`.
+- **`SMTP_USER`**, **`SMTP_PASSWORD`**: Credentials. AUTH is enabled automatically when a user is set.
+- **`SMTP_FROM`**: Envelope sender. Default `noreply@<container hostname>`.
+- **`SMTP_TLS`**, **`SMTP_TLS_STARTTLS`**, **`SMTP_AUTH`**: `on`/`off` overrides. Defaults: port 465 is TLS without STARTTLS, ports 25 and 1025 are plain, everything else is STARTTLS.
+
 ### Worker mode (php image)
 - **`CLI_COMMAND`**: Command to run as a long-lived worker. Used when the image starts with its default command or the `worker` command; restarted whenever it exits. Output is tagged `[worker]`.
 - **`CLI_RESTART_DELAY`**: Seconds to wait before restarting the worker. Default `2`.

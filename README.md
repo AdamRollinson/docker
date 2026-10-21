@@ -78,6 +78,20 @@ All images default to running as `appuser` (UID 1000). When running as non-root:
 
 Use `--user root` when you need privileged ports.
 
+### Sending mail
+
+There is no mail server in the images. Point them at one and `mail()`, Laravel's `sendmail` transport and anything else that shells out to sendmail relay through SMTP via msmtp:
+
+```bash
+docker run --rm -d -p 8080:8080 -e NGINX_PORT=8080 \
+  -e SMTP_HOST=smtp.postmarkapp.com -e SMTP_PORT=587 \
+  -e SMTP_USER=token -e SMTP_PASSWORD=token \
+  -e SMTP_FROM=noreply@example.com \
+  adamrollogi/php-nginx:8.4
+```
+
+TLS and authentication default sensibly from the port and the presence of a user (465 implicit TLS, otherwise STARTTLS; AUTH on when `SMTP_USER` is set) and can be forced with `SMTP_TLS`, `SMTP_TLS_STARTTLS` and `SMTP_AUTH`. Setting `PHP_SENDMAIL_PATH` yourself still wins.
+
 ### Queue workers and other long-running commands
 
 Set `CLI_COMMAND` on the `php` image and the entrypoint runs it, restarting it whenever it exits, with output tagged `[worker]`:

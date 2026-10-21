@@ -111,7 +111,25 @@ test_php() {
     noise=$(docker run --rm -e "php.memory_limit=321M" "$img" php -r 'echo "x";' 2>/dev/null)
     [ "$noise" = "x" ] && pass "entrypoint keeps stdout clean for CLI output" || fail "entrypoint wrote to stdout: '$noise'"
     docker run --rm "$img" php --ini 2>/dev/null | grep -q "/run/php/php.ini" && pass "php.ini loaded from /run/php" || fail "php.ini not loaded from /run/php"
-    local cid
+    # mail relay: php mail() through msmtp to a Mailpit sink on a private network
+    local net mp cid
+    net="imgtest-$$-$RANDOM"
+    docker network create "$net" >/dev/null
+    mp=$(docker run -d --rm --network "$net" --name "mailpit-$$" -p 127.0.0.1::8025 axllent/mailpit:latest)
+    CONTAINERS+=("$mp")
+    local mpport
+    mpport=$(docker port "$mp" 8025/tcp | head -1 | sed 's/.*://')
+    for _ in $(seq 1 30); do curl -sf "http://127.0.0.1:${mpport}/api/v1/info" >/dev/null 2>&1 && break; sleep 0.5; done
+    local mail_out
+    mail_out=$(docker run --rm --network "$net" -e SMTP_HOST="mailpit-$$" -e SMTP_PORT=1025 -e SMTP_FROM=test@example.test "$img" \
+        php -r 'var_dump(mail("to@example.test", "smoke test", "hello from the image"));' 2>&1)
+    local count
+    count=$(curl -s "http://127.0.0.1:${mpport}/api/v1/messages" | grep -o '"total":[0-9]*' | head -1 | cut -d: -f2)
+    docker rm -f "$mp" >/dev/null 2>&1; docker network rm "$net" >/dev/null 2>&1
+    [ "${count:-0}" = "1" ] && pass "mail() relays through msmtp to SMTP_HOST" || fail "mail relay did not deliver (messages=${count:-0})" "$mail_out"
+    local sp
+    sp=$(docker run --rm "$img" php -r 'echo ini_get("sendmail_path");' 2>/dev/null)
+    [ -z "$sp" ] && pass "sendmail_path untouched without SMTP_HOST" || fail "sendmail_path set without SMTP_HOST: '$sp'"
     cid=$(docker run -d --rm -e CRON_SCHEDULE='*/1 * * * * * *' -e CRON_COMMAND='echo cli-cron-tick' "$img" cron)
     CONTAINERS+=("$cid")
     sleep 4

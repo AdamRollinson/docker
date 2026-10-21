@@ -233,7 +233,9 @@ fi
 # PHP / FPM config (unchanged)
 # ---------------------------------------------------------------------------
 
-# Render php.ini (PHPRC points PHP at /run/php) and the FPM pool into /run/php
+# Mail relay first (sets PHP_SENDMAIL_PATH when SMTP_HOST is given), then php.ini
+# (PHPRC points PHP at /run/php) and the FPM pool into /run/php
+render_msmtp
 envsubst < /usr/local/etc/php/php.ini.template > "${PHP_RUN_DIR}/php.ini"
 envsubst < /usr/local/etc/php/www.conf.template > "${PHP_RUN_DIR}/php-fpm.d/www.conf"
 

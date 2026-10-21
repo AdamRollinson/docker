@@ -13,8 +13,9 @@ fi
 # Session cookies are only marked Secure when explicitly requested for the CLI image
 export PHP_SESSION_COOKIE_SECURE="${PHP_SESSION_COOKIE_SECURE:-Off}"
 
-# Render php.ini into /run/php (PHPRC points PHP at it); /etc/php* stays root-owned
+# Mail relay (sets PHP_SENDMAIL_PATH when SMTP_HOST is given), then php.ini
 mkdir -p /run/php
+render_msmtp
 envsubst < /usr/local/etc/php/php.ini.template > /run/php/php.ini
 
 # Any php.<setting>=<value> environment variable is appended as an override

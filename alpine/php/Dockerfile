@@ -53,6 +53,17 @@ ENV PHP_EXPOSE_PHP=Off \
     PHP_MAX_INPUT_VARS=1000 \
     PHP_SENDMAIL_PATH=""
 
+# Outbound mail: when SMTP_HOST is set the entrypoint renders an msmtp configuration and points
+# PHP's sendmail_path at it, so mail() and framework "sendmail" transports relay through SMTP
+ENV SMTP_HOST="" \
+    SMTP_PORT=587 \
+    SMTP_USER="" \
+    SMTP_PASSWORD="" \
+    SMTP_FROM="" \
+    SMTP_TLS="" \
+    SMTP_TLS_STARTTLS="" \
+    SMTP_AUTH=""
+
 # Worker mode: when CLI_COMMAND is set and the image is started with its default command,
 # the entrypoint runs CLI_COMMAND and restarts it whenever it exits (see php-entrypoint.sh)
 ENV CLI_COMMAND="" \
@@ -115,6 +126,7 @@ RUN set -eux; \
             "php${PHP_VERSION}-${optional}" 2>/dev/null \
             || echo "NOTICE: php${PHP_VERSION}-${optional%%~*} is not packaged for this PHP version"; \
     done; \
+    apk add --no-cache msmtp; \
     # Pre-releases differ in spelling between apk (8.6.0_rc3) and PHP (8.6.0RC3); normalise both
     if [ -n "${PHP_PATCH_VERSION}" ]; then \
         installed="$(php${PHP_VERSION} -r 'echo strtolower(PHP_VERSION);')"; \
@@ -157,8 +169,8 @@ COPY php-entrypoint.sh /usr/local/bin/
 # Make the entrypoint script executable
 RUN chmod +x /usr/local/bin/php-entrypoint.sh
 
-# Copy the custom PHP ini template
-COPY php.ini.template /usr/local/etc/php/
+# Copy the custom PHP ini and msmtp templates
+COPY php.ini.template msmtprc.template /usr/local/etc/php/
 
 # Runtime-rendered config goes to /run/php; /etc/php* stays root-owned
 RUN mkdir -p /run/php && \

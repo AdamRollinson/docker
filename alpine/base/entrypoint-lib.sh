@@ -69,3 +69,30 @@ render_crontab() {
         echo "$out"
     fi
 }
+
+# Outbound mail relay. When SMTP_HOST is set, render /run/php/msmtprc from the SMTP_* variables
+# and point sendmail_path at msmtp unless PHP_SENDMAIL_PATH was given explicitly. TLS defaults
+# follow the port: 465 is implicit TLS, anything else uses STARTTLS; AUTH is on when a user is set.
+render_msmtp() {
+    [ -n "${SMTP_HOST:-}" ] || return 0
+    local rc=/run/php/msmtprc
+    export SMTP_PORT="${SMTP_PORT:-587}"
+    export SMTP_FROM="${SMTP_FROM:-noreply@$(hostname)}"
+    export SMTP_AUTH="${SMTP_AUTH:-$([ -n "${SMTP_USER:-}" ] && echo on || echo off)}"
+    if [ "${SMTP_PORT}" = "465" ]; then
+        export SMTP_TLS="${SMTP_TLS:-on}" SMTP_TLS_STARTTLS="${SMTP_TLS_STARTTLS:-off}"
+    elif [ "${SMTP_PORT}" = "25" ] || [ "${SMTP_PORT}" = "1025" ]; then
+        export SMTP_TLS="${SMTP_TLS:-off}" SMTP_TLS_STARTTLS="${SMTP_TLS_STARTTLS:-off}"
+    else
+        export SMTP_TLS="${SMTP_TLS:-on}" SMTP_TLS_STARTTLS="${SMTP_TLS_STARTTLS:-on}"
+    fi
+    mkdir -p "$(dirname "$rc")"
+    (umask 077; envsubst < /usr/local/etc/php/msmtprc.template > "$rc")
+    # msmtp rejects empty user/password lines, so drop them when unset
+    [ -n "${SMTP_USER:-}" ] || sed -i '/^user $/d' "$rc"
+    [ -n "${SMTP_PASSWORD:-}" ] || sed -i '/^password $/d' "$rc"
+    if [ -z "${PHP_SENDMAIL_PATH:-}" ]; then
+        export PHP_SENDMAIL_PATH="/usr/bin/msmtp -C ${rc} -t"
+    fi
+    log "INFO: Mail relay configured: ${SMTP_HOST}:${SMTP_PORT} (tls=${SMTP_TLS}, starttls=${SMTP_TLS_STARTTLS}, auth=${SMTP_AUTH}, from=${SMTP_FROM})."
+}
