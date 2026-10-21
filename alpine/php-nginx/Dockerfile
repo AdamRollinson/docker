@@ -93,18 +93,17 @@ RUN ln -s /usr/sbin/php-fpm${PHP_VERSION} /usr/sbin/php-fpm
 # Make scripts executable
 RUN chmod +x /usr/local/bin/php-nginx-entrypoint.sh /usr/local/bin/healthcheck.sh
 
-# Set ownership of runtime-writable dirs for non-root mode.
-# Config under /etc stays root-owned; rendered config is written to /run/nginx and /run/php.
-RUN mkdir -p /var/lib/nginx/logs /var/log/php${PHP_VERSION} /etc/nginx/ssl /run/nginx/http.d /run/nginx/after.d /run/php/php-fpm.d && \
-    chown -R appuser:appuser \
-    /run/nginx \
-    /run/php \
-    /etc/nginx/ssl \
-    /var/log/nginx \
-    /var/log/php${PHP_VERSION} \
-    /var/log/php-fpm \
-    /run/nginx \
-    /var/lib/nginx
+# Set ownership of runtime-writable dirs for non-root mode. Config under /etc stays root-owned;
+# rendered config is written to /run/nginx and /run/php. The state directories are sticky and
+# world-writable (like /tmp) so the image also runs under an arbitrary --user.
+RUN set -eux; \
+    mkdir -p /var/lib/nginx/logs /var/lib/nginx/tmp /var/log/php${PHP_VERSION} /var/log/php-fpm /etc/nginx/ssl \
+        /run/nginx/http.d /run/nginx/after.d /run/php/php-fpm.d; \
+    for dir in /run/nginx /run/php /etc/nginx/ssl /var/log/nginx /var/log/php${PHP_VERSION} /var/log/php-fpm /var/lib/nginx; do \
+        chown -R appuser:appuser "$dir"; \
+        chmod -R a+rwX "$dir"; \
+        find "$dir" -type d -exec chmod +t {} +; \
+    done
 
 # Healthcheck using wrapper script (handles HTTP and HTTPS modes)
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \

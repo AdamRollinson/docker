@@ -194,9 +194,12 @@ RUN chmod +x /usr/local/bin/php-entrypoint.sh
 # Copy the custom PHP ini and msmtp templates
 COPY php.ini.template msmtprc.template /usr/local/etc/php/
 
-# Runtime-rendered config goes to /run/php; /etc/php* stays root-owned
+# Runtime-rendered config goes to /run/php; /etc/php* stays root-owned. Runtime state
+# directories are sticky and world-writable so any --user can render its config and write logs.
 RUN mkdir -p /run/php && \
-    chown -R appuser:appuser /run/php /var/log
+    chown -R appuser:appuser /run/php /var/log && \
+    chmod -R a+rwX /run/php /var/log && \
+    find /run/php /var/log -type d -exec chmod +t {} +
 
 # Default to non-root user
 USER appuser

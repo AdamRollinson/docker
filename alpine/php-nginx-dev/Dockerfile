@@ -35,6 +35,7 @@ RUN set -eux; \
     rm -f /etc/php${PHP_VERSION}/conf.d/*xdebug*.ini; \
     mkdir -p /run/php/conf.d; \
     chown appuser:appuser /run/php/conf.d; \
+    chmod 1777 /run/php/conf.d; \
     find / -xdev -type f -perm /6000 -exec chmod a-s {} +
 
 # OCI metadata labels

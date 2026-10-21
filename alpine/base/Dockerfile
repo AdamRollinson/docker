@@ -53,8 +53,10 @@ RUN addgroup -g "${APP_GID}" -S appuser && \
 # Set working directory
 WORKDIR /app
 
-# Set ownership of working directory and the runtime directory for the rendered crontab
-RUN mkdir -p /run/cron && chown appuser:appuser /app /run/cron
+# Set ownership of the working directory and the runtime directory for the rendered crontab.
+# Runtime state directories are world-writable with the sticky bit (like /tmp) so the images
+# also work under an arbitrary --user, not only as UID 1000.
+RUN mkdir -p /run/cron && chown appuser:appuser /app /run/cron && chmod 1777 /run/cron
 
 # Shared entrypoint helpers and the service wrapper that tags log lines per service
 COPY --chown=root:root entrypoint-lib.sh /usr/local/lib/entrypoint-lib.sh

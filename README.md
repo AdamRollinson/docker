@@ -137,7 +137,7 @@ docker run --rm -d -e CRON_SCHEDULE="* * * * *" -e CRON_COMMAND="php /app/artisa
 
 ### Matching your host user
 
-Bind-mounted files are read and written as UID 1000. For local development with a different host UID, either run with `--user "$(id -u):$(id -g)"`, which the images support out of the box, or bake your IDs into the base image so every derived image inherits them:
+Bind-mounted files are read and written as UID 1000. For local development with a different host UID, either run with `--user "$(id -u):$(id -g)"`, which works out of the box because the runtime state directories (`/run/php`, `/run/nginx`, `/run/cron`, `/var/log`, `/var/lib/nginx`) are sticky and world-writable like `/tmp`, or bake your IDs into the base image so every derived image inherits them:
 
 ```bash
 docker build --build-arg APP_UID=$(id -u) --build-arg APP_GID=$(id -g) -t adamrollogi/base:latest ./alpine/base

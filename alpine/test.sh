@@ -157,6 +157,9 @@ test_php() {
     local out
     out=$(docker run --rm -e CLI_COMMAND='echo should-not-run' "$img" php -r 'echo "explicit";' 2>/dev/null)
     [ "$out" = "explicit" ] && pass "an explicit command overrides CLI_COMMAND" || fail "CLI_COMMAND hijacked an explicit command: '$out'"
+    # arbitrary --user: the run directories must be writable by any uid
+    out=$(docker run --rm --user 4321:4321 -e "php.memory_limit=345M" "$img" php -r 'echo posix_getuid(), " ", ini_get("memory_limit");' 2>/dev/null)
+    [ "$out" = "4321 345M" ] && pass "runs under an arbitrary --user with config rendered" || fail "arbitrary --user failed" "$out"
 }
 
 test_php_nginx() {
@@ -203,6 +206,14 @@ test_php_nginx() {
     CONTAINERS+=("$cid")
     for _ in $(seq 1 40); do curl -sf "http://127.0.0.1:${port}/health" >/dev/null 2>&1 && break; sleep 0.5; done
     curl -sf "http://127.0.0.1:${port}/health" >/dev/null && pass "read-only rootfs recipe works" || fail "read-only rootfs recipe failed" "$(docker logs "$cid" 2>&1 | tail -5)"
+    docker rm -f "$cid" >/dev/null
+
+    # arbitrary --user: every process runs as that uid and config is rendered into the run dirs
+    port=$(free_port)
+    cid=$(start_web "$port" --user 4321:4321 -e "php.memory_limit=345M" -v "$WORK/www:/var/www/html:ro" "$img") || fail "container did not start under --user 4321"
+    body=$(curl -s "http://127.0.0.1:${port}/")
+    [[ "$body" == *" 345M "* ]] && pass "arbitrary --user serves php with config rendered" || fail "arbitrary --user response unexpected: '$body'"
+    docker exec "$cid" sh -c 'ps -o user,args | grep -E "nginx|php-fpm" | grep -v grep | grep -vq "^4321 "' && fail "a process is not running as uid 4321" "$(docker exec "$cid" ps -o user,args)" || pass "nginx and php-fpm run as uid 4321"
     docker rm -f "$cid" >/dev/null
 
     # root mode
