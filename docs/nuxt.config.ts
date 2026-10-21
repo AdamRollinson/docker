@@ -8,7 +8,8 @@ export default defineNuxtConfig({
     '@nuxt/ui',
     '@nuxt/content',
     'nuxt-og-image',
-    'nuxt-llms'
+    'nuxt-llms',
+    '@nuxtjs/sitemap'
   ],
 
   devtools: {
@@ -87,5 +88,11 @@ export default defineNuxtConfig({
       '/'
     ],
     crawlLinks: true
+  },
+
+  // Sitemap is generated at build time from the prerendered routes; robots.txt lives in public/
+  sitemap: {
+    autoLastmod: false,
+    exclude: ['/raw/**', '/_og/**']
   }
 })
