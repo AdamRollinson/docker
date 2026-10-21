@@ -15,9 +15,9 @@ Full documentation: https://docker.rollogi.co.uk (source in `docs/`). This READM
 
 **Supported PHP versions:** 8.2, 8.3, 8.4, 8.5, and 8.6 as a pre-release
 
-PHP 8.6 is published from Alpine's testing repository while it is in release candidate (tag `php:8.6`, and the exact tag follows Alpine's spelling, e.g. `php:8.6.0_rc3`). Treat it as experimental until 8.6.0 ships. The `imagick` extension is not yet packaged for 8.6, and from 8.5 onward OPcache is compiled into PHP itself rather than installed as a separate package.
+Each image is published under two tags: the minor version (`php:8.4`, tracks the latest pinned release) and the exact release (`php:8.4.27`, immutable). Pin the exact tag in production if you want to control when PHP updates roll out.
 
-Each image is published under two tags: the minor version (`php:8.4`, tracks the latest pinned release) and the exact release (`php:8.4.26`, immutable). Pin the exact tag in production if you want to control when PHP updates roll out.
+Pre-releases live on a channel tag. PHP 8.6 is built from Alpine's testing repository while it is a release candidate and published as `php:8.6-rc` (moves with each candidate) plus the exact tag in Alpine's spelling, `php:8.6.0_rc3`. The bare `php:8.6` tag does not exist until 8.6.0 is pinned, so nothing tracking a minor tag can receive a release candidate by accident; when 8.6.0 lands the bump creates `php:8.6` and `php:8.6-rc` stops moving. Treat the channel as experimental: the `imagick` extension is not yet packaged for 8.6, and from 8.5 onward OPcache is compiled into PHP itself rather than installed as a separate package.
 
 ### Image inheritance
 

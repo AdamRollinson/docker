@@ -48,8 +48,13 @@ jobs:
       - name: Read pinned PHP versions
         id: versions
         run: |
+          # tag: the moving tag. The bare minor for a final release; a channel tag such as 8.6-rc
+          # for a pre-release pin (8.6.0_rc3), so php:8.6 only appears once 8.6.0 is pinned.
           matrix=$(grep -Ev '^[[:space:]]*(#|$)' alpine/php-versions.txt \
-            | jq -Rcn '{include: [inputs | [splits("\\s+")] | map(select(. != "")) | {minor: .[0], patch: .[1]}]}')
+            | jq -Rcn '{include: [inputs | [splits("\\s+")] | map(select(. != ""))
+                | {minor: .[0], patch: .[1]}
+                | . + {prerelease: (.patch | test("_")),
+                       tag: (if (.patch | test("_")) then .minor + "-" + (.patch | capture("_(?<p>[a-z]+)").p) else .minor end)}]}')
           echo "Matrix: $matrix"
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
@@ -216,7 +221,7 @@ jobs:
       - name: Promote PHP Image (${{ matrix.minor }})
         run: |
           docker buildx imagetools create \
-            -t ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ matrix.minor }} \
+            -t ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ matrix.tag }} \
             -t ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ matrix.patch }} \
             ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
 
@@ -226,7 +231,7 @@ jobs:
       # workflow on the main branch; see docs/security/scanning-and-attestations for how to verify.
       - name: Sign PHP Image (${{ matrix.minor }})
         run: |
-          digest=$(docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ matrix.minor }} --format '{{.Manifest.Digest}}')
+          digest=$(docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ matrix.tag }} --format '{{.Manifest.Digest}}')
           cosign sign --yes --recursive "${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}@${digest}"
       - name: Build PHP-NGINX Image (${{ matrix.minor }}) candidate
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -239,7 +244,7 @@ jobs:
           tags: |
             ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
           build-args: |
-            PHP_IMAGE_TAG=${{ matrix.minor }}
+            PHP_IMAGE_TAG=${{ matrix.tag }}
             PHP_VERSION=${{ env.PHP_VERSION }}
           outputs: 'type=registry'
           provenance: true
@@ -268,7 +273,7 @@ jobs:
       - name: Promote PHP-NGINX Image (${{ matrix.minor }})
         run: |
           docker buildx imagetools create \
-            -t ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ matrix.minor }} \
+            -t ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ matrix.tag }} \
             -t ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ matrix.patch }} \
             ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
 
@@ -278,7 +283,7 @@ jobs:
       # workflow on the main branch; see docs/security/scanning-and-attestations for how to verify.
       - name: Sign PHP-NGINX Image (${{ matrix.minor }})
         run: |
-          digest=$(docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ matrix.minor }} --format '{{.Manifest.Digest}}')
+          digest=$(docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ matrix.tag }} --format '{{.Manifest.Digest}}')
           cosign sign --yes --recursive "${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}@${digest}"
       - name: Build PHP-NGINX-DEV Image (${{ matrix.minor }}) candidate
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -291,7 +296,7 @@ jobs:
           tags: |
             ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
           build-args: |
-            PHP_IMAGE_TAG=${{ matrix.minor }}
+            PHP_IMAGE_TAG=${{ matrix.tag }}
             PHP_VERSION=${{ env.PHP_VERSION }}
           outputs: 'type=registry'
           provenance: true
@@ -320,7 +325,7 @@ jobs:
       - name: Promote PHP-NGINX-DEV Image (${{ matrix.minor }})
         run: |
           docker buildx imagetools create \
-            -t ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ matrix.minor }} \
+            -t ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ matrix.tag }} \
             -t ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ matrix.patch }} \
             ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
 
@@ -329,13 +334,13 @@ jobs:
       # workflow on the main branch; see docs/security/scanning-and-attestations for how to verify.
       - name: Sign PHP-NGINX-DEV Image (${{ matrix.minor }})
         run: |
-          digest=$(docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ matrix.minor }} --format '{{.Manifest.Digest}}')
+          digest=$(docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ matrix.tag }} --format '{{.Manifest.Digest}}')
           cosign sign --yes --recursive "${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}@${digest}"
       - name: Verify Built Images
         run: |
-          docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ matrix.minor }}
-          docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ matrix.minor }}
-          docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ matrix.minor }}
+          docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}:${{ matrix.tag }}
+          docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}:${{ matrix.tag }}
+          docker buildx imagetools inspect ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}:${{ matrix.tag }}
 
       - name: Remove candidate tags
         if: always()

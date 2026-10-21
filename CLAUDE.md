@@ -11,7 +11,7 @@ Docker image build system that produces multi-architecture (amd64/arm64) PHP con
 3. **`adamrollogi/php-nginx:{version}`** — PHP-FPM + Nginx web stack (builds on php)
 4. **`adamrollogi/php-nginx-dev:{version}`** — php-nginx plus Xdebug and development defaults (builds on php-nginx)
 
-Supported PHP versions: **8.2, 8.3, 8.4, 8.5**, plus **8.6** as a pre-release from Alpine edge/testing
+Supported PHP versions: **8.2, 8.3, 8.4, 8.5**, plus **8.6** as a pre-release from Alpine edge/testing on the `8.6-rc` channel tag (no bare `8.6` tag until 8.6.0 is pinned)
 
 The exact release for each minor version is pinned in `alpine/php-versions.txt` (format: `<minor> <release>` per line). This file is the single source of truth for both `build.sh` and the CI matrix. `alpine/check-php-versions.sh` compares the pins with the APKINDEX of every repository apk sees in the Dockerfiles (the base image's stable branch, derived from `alpine/base/Dockerfile`, plus edge main/community/testing) for both architectures, taking the newest version across all of them exactly as apk resolves it, and shows the latest php.net release per branch so an upstream security fix that Alpine has not packaged yet is visible (`CHECK_UPSTREAM=false` skips the lookup); only Alpine availability drives `--update`, which rewrites the file. The `php-version-bump` workflow runs that script every four hours and commits the result.
 
@@ -61,6 +61,7 @@ PHP versions use two formats throughout the codebase:
 - **Dotted** (`8.3`) — used for Docker image tags and `PHP_IMAGE_TAG` build arg
 - **Stripped** (`83`) — used for `PHP_VERSION` build arg and Alpine package names (e.g., `php83-cli`)
 - **Release** (`8.3.35`) — `PHP_PATCH_VERSION` build arg, applied as an apk constraint (`php83~8.3.35`) and used as an extra image tag
+- **Channel tag** (`8.6-rc`) — the moving tag for a pre-release pin, derived from the release spelling (`8.6.0_rc3` → `8.6-rc`, `_beta2` → `-beta`); a final release uses the bare minor. Computed by `channel_tag` in `build.sh`, by the `tag` field of the CI matrix (jq in the `php-matrix` job), and by `test.sh all`. php-nginx and php-nginx-dev are built `FROM` the channel tag, and promote/sign/verify steps use `matrix.tag`; candidate tags, cache scopes and step names stay keyed by `matrix.minor`.
 
 The build script converts between them: `PHP_VERSION_ENV=$(echo "$version" | tr -d '.')`
 

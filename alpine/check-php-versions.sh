@@ -135,8 +135,10 @@ while read -r minor pinned; do
         skipped=$((skipped + 1))
         continue
     fi
+    channel=""
+    case "$pinned" in *_*) channel=" [pre-release channel, tag ${minor}-$(printf '%s' "${pinned#*_}" | tr -d '0-9')]" ;; esac
     if [ "$amd64" = "$pinned" ]; then
-        echo "PHP $minor: pinned $pinned, Alpine $amd64${note}"
+        echo "PHP $minor: pinned $pinned, Alpine $amd64${note}${channel}"
         continue
     fi
     if ! is_newer "$amd64" "$pinned"; then
@@ -145,12 +147,16 @@ while read -r minor pinned; do
         continue
     fi
 
-    echo "PHP $minor: pinned $pinned, Alpine $amd64${note}, update available"
+    echo "PHP $minor: pinned $pinned, Alpine $amd64${note}${channel}, update available"
     updates=$((updates + 1))
     if $UPDATE; then
         sed -i.bak "s/^${minor//./\\.} ${pinned//./\\.}\$/$minor $amd64/" "$VERSIONS_FILE"
         rm -f "$VERSIONS_FILE.bak"
         echo "PHP $minor: updated to $amd64"
+        case "$pinned:$amd64" in
+            *_*:*_*) ;;
+            *_*:*) echo "PHP $minor: final release, the bare ${minor} tag will be published from this build and the pre-release channel tag stops moving" ;;
+        esac
     fi
 done < <(grep -Ev '^[[:space:]]*(#|$)' "$VERSIONS_FILE")
 

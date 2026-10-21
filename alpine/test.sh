@@ -7,7 +7,7 @@
 #   alpine/test.sh php           IMAGE EXPECTED_PHP_VERSION
 #   alpine/test.sh php-nginx     IMAGE EXPECTED_PHP_VERSION
 #   alpine/test.sh php-nginx-dev IMAGE EXPECTED_PHP_VERSION
-#   alpine/test.sh all           MINOR            # local images adamrollogi/*:MINOR, version from php-versions.txt
+#   alpine/test.sh all           MINOR            # local images adamrollogi/*:MINOR (or *:MINOR-rc for a pre-release), version from php-versions.txt
 #
 # Exits non-zero on the first failing check. Needs docker and curl.
 
@@ -312,10 +312,12 @@ case "${1:-}" in
         minor="${2:?usage: test.sh all MINOR}"
         version=$(grep -E "^${minor//./\\.} " "$(dirname "$0")/php-versions.txt" | awk '{print $2}')
         [ -n "$version" ] || { echo "no pin for $minor in php-versions.txt" >&2; exit 2; }
+        # pre-releases are tagged on a channel (8.6-rc), not the bare minor
+        case "$version" in *_*) tag="${minor}-$(printf '%s' "${version#*_}" | tr -d '0-9')" ;; *) tag="$minor" ;; esac
         test_base "$PREFIX/base:latest"
-        test_php "$PREFIX/php:$minor" "$version"
-        test_php_nginx "$PREFIX/php-nginx:$minor" "$version"
-        test_php_nginx_dev "$PREFIX/php-nginx-dev:$minor" "$version"
+        test_php "$PREFIX/php:$tag" "$version"
+        test_php_nginx "$PREFIX/php-nginx:$tag" "$version"
+        test_php_nginx_dev "$PREFIX/php-nginx-dev:$tag" "$version"
         ;;
     *) sed -n '3,12p' "$0"; exit 2 ;;
 esac
