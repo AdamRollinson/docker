@@ -22,44 +22,41 @@ RUN apk upgrade --no-cache && \
     git \
     wget \
     nano \
-    supervisor \
     shadow \
     gcompat \
-    py3-pip \
     gettext-envsubst \
+    supercronic \
     tini && \
-    # Alpine's py3-setuptools (80.x) is affected by CVE-2026-59890, fixed in 83.0.0.
-    # supervisor 4.3.0 uses importlib rather than pkg_resources, so no upper bound is needed.
-    pip3 install --no-cache-dir --break-system-packages --root-user-action=ignore 'setuptools>=83.0.0' && \
-    apk del py3-pip && \
     # Remove setuid/setgid bits: nothing in these images needs privilege escalation helpers
     find / -xdev -type f -perm /6000 -exec chmod a-s {} + && \
     # Set timezone
     ln -sf /usr/share/zoneinfo/${TZ} /etc/localtime && \
     echo "${TZ}" > /etc/timezone && \
-    # Clean up and set permissions
-    mkdir -p /etc/cron.d /var/log && \
-    touch /var/log/cron.log && \
-    chmod 0644 /var/log/cron.log
+    mkdir -p /var/log
 
 # OCI metadata labels
 LABEL org.opencontainers.image.title="adamrollogi/base" \
-      org.opencontainers.image.description="Alpine 3.24 base with Supervisor and common tools" \
+      org.opencontainers.image.description="Alpine 3.24 base with tini, supercronic and common tools" \
       org.opencontainers.image.source="https://github.com/adamrollogi/docker" \
       org.opencontainers.image.licenses="MIT"
 
-# Create non-root application user
-RUN addgroup -g 1000 -S appuser && \
-    adduser -u 1000 -S appuser -G appuser
+# Create the non-root application user. Override the IDs at build time so bind-mounted
+# files owned by your host user are writable without chown gymnastics:
+#   docker build --build-arg APP_UID=$(id -u) --build-arg APP_GID=$(id -g) ...
+ARG APP_UID=1000
+ARG APP_GID=1000
+ENV APP_UID=${APP_UID} \
+    APP_GID=${APP_GID}
+RUN addgroup -g "${APP_GID}" -S appuser && \
+    adduser -u "${APP_UID}" -S appuser -G appuser
 
 # Set working directory
 WORKDIR /app
 
-# Set ownership of working directory
-RUN chown appuser:appuser /app
-
-# Copy only necessary configuration files
-COPY --chown=root:root supervisord.conf /etc/supervisord.conf
+# Set ownership of the working directory and the runtime directory for the rendered crontab.
+# Runtime state directories are world-writable with the sticky bit (like /tmp) so the images
+# also work under an arbitrary --user, not only as UID 1000.
+RUN mkdir -p /run/cron && chown appuser:appuser /app /run/cron && chmod 1777 /run/cron
 
 # Shared entrypoint helpers and the service wrapper that tags log lines per service
 COPY --chown=root:root entrypoint-lib.sh /usr/local/lib/entrypoint-lib.sh

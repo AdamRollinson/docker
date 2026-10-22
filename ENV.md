@@ -8,6 +8,30 @@
 - **`LOG_TAG`**: `true` (default) adds the `[service]` prefixes in text mode; `false` leaves lines untouched. Ignored in json and file modes.
 - Services are launched through `/usr/local/bin/run-service <name> <command>`, which implements the tagging; `container-logs [-f] [service|all]` tails the per-service files in file mode.
 
+### Mail relay
+- **`SMTP_HOST`**: SMTP server to relay through. When set, the entrypoint renders `/run/php/msmtprc` and sets `sendmail_path` to msmtp (unless `PHP_SENDMAIL_PATH` is given).
+- **`SMTP_PORT`**: Default `587`.
+- **`SMTP_USER`**, **`SMTP_PASSWORD`**: Credentials. AUTH is enabled automatically when a user is set.
+- **`SMTP_FROM`**: Envelope sender. Default `noreply@<container hostname>`.
+- **`SMTP_TLS`**, **`SMTP_TLS_STARTTLS`**, **`SMTP_AUTH`**: `on`/`off` overrides. Defaults: port 465 is TLS without STARTTLS, ports 25 and 1025 are plain, everything else is STARTTLS.
+
+### Worker mode (php image)
+- **`CLI_COMMAND`**: Command to run as a long-lived worker. Used when the image starts with its default command or the `worker` command; restarted whenever it exits. Output is tagged `[worker]`.
+- **`CLI_RESTART_DELAY`**: Seconds to wait before restarting the worker. Default `2`.
+- **`CLI_MAX_RESTARTS`**: Give up after this many restarts and exit with the worker's status. Default `0` (unlimited).
+
+### Startup command
+- **`APP_INSTALL`**: Command run once at startup, before the main command (php image) or before php-fpm and nginx start (php-nginx). Output tagged `[install]`; a non-zero exit stops the container with that status.
+- **`APP_INSTALL_DIR`**: Directory the command runs in. Default `/app` (php) or `/var/www/html` (php-nginx).
+
+### Composer
+Standard Composer variables with container-friendly defaults: **`COMPOSER_HOME`** `/tmp/composer`, **`COMPOSER_CACHE_DIR`** `/tmp/composer/cache`, **`COMPOSER_ALLOW_SUPERUSER`** `1`, **`COMPOSER_NO_INTERACTION`** `1`, **`COMPOSER_FUND`** `0`, **`COMPOSER_MEMORY_LIMIT`** `-1`, **`COMPOSER_PROCESS_TIMEOUT`** `600`. Override any of them as usual.
+
+### Cron
+- **`CRON_SCHEDULE`**: Schedule for the single job defined by `CRON_COMMAND`. Default `* * * * *` (every minute). Standard five fields, or seven with leading seconds and trailing year.
+- **`CRON_COMMAND`**: Command to run on `CRON_SCHEDULE`. When set, supercronic is started alongside the web services (php-nginx) or by the `cron` command (php image).
+- **`CRONTAB_FILE`**: Path of a mounted crontab with any number of jobs. Default `/etc/crontabs/app`. Used in addition to `CRON_COMMAND` when both exist.
+
 ## `alpine/php/Dockerfile`
 
 ### PHP General Settings
@@ -88,6 +112,8 @@ All SSL settings are opt-in. When `NGINX_SSL_ENABLED` is `false` (the default), 
 - **`NGINX_SSL_SESSION_CACHE`**: SSL session cache configuration. Default is `shared:SSL:10m`.
 - **`NGINX_SSL_REDIRECT`**: Whether to redirect HTTP requests to HTTPS when SSL is enabled. Default is `true`.
 - **`NGINX_SSL_REDIRECT_PORT`**: Port for the HTTP-to-HTTPS redirect listener. Defaults to the value of `NGINX_PORT`.
+- **`NGINX_METRICS_PORT`**: When set, nginx opens an extra listener on this port serving `/nginx_status` (stub_status), `/fpm-status`, `/fpm-ping` and `/health`. Empty (disabled) by default. Never exposed on the application port.
+- **`NGINX_METRICS_ALLOW`**: Address or CIDR allowed to reach the metrics listener (`allow` directive). Default `all`.
 - **`NGINX_LISTEN_IPV6`**: Adds `listen [::]:<port>` alongside the IPv4 listener. Default is `true`; set `false` on hosts where IPv6 is disabled in the kernel.
 - **`NGINX_ACCESS_LOG`**: Access log destination. Empty by default, which resolves to `/dev/stdout` or `/var/log/nginx/access.log` when `LOG_MODE=file`. Use `off` to disable.
 - **`NGINX_ERROR_LOG`**: Error log destination for both the `http` block and the app server. Empty by default, which resolves to `/dev/stderr` or `/var/log/nginx/error.log` when `LOG_MODE=file`.

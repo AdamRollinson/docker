@@ -76,7 +76,7 @@ Each image builds on the one before it, so behaviour is consistent from the CLI 
   base
 
   #description
-  Alpine 3.24 with tini, Supervisor, bash, curl, git and the shared logging helpers. The foundation for everything else.
+  Alpine 3.24 with tini, cron, bash, curl, git and the shared logging helpers. No Python, no process manager. The foundation for everything else.
   :::
 
   :::u-page-feature

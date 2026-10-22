@@ -1,0 +1,16 @@
+# Rendered by the entrypoint from SMTP_* variables when SMTP_HOST is set.
+# PHP's sendmail_path then points msmtp at this file.
+defaults
+auth ${SMTP_AUTH}
+tls ${SMTP_TLS}
+tls_starttls ${SMTP_TLS_STARTTLS}
+tls_trust_file /etc/ssl/certs/ca-certificates.crt
+logfile -
+syslog off
+
+account default
+host ${SMTP_HOST}
+port ${SMTP_PORT}
+from ${SMTP_FROM}
+user ${SMTP_USER}
+password ${SMTP_PASSWORD}

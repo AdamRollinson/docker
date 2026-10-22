@@ -8,22 +8,22 @@ Full documentation: https://docker.rollogi.co.uk (source in `docs/`). This READM
 
 | Image | Description |
 |-------|-------------|
-| `adamrollogi/base:latest` | Alpine 3.24 base with Supervisor, tini, bash, curl, git |
+| `adamrollogi/base:latest` | Alpine 3.24 base with tini, supercronic, bash, curl, git |
 | `adamrollogi/php:{version}` | PHP CLI with Composer and common extensions |
 | `adamrollogi/php-nginx:{version}` | PHP-FPM + Nginx web stack with optional HTTPS |
 | `adamrollogi/php-nginx-dev:{version}` | php-nginx plus Xdebug, visible errors and uncached assets, for local development |
 
 **Supported PHP versions:** 8.2, 8.3, 8.4, 8.5, and 8.6 as a pre-release
 
-PHP 8.6 is published from Alpine's testing repository while it is in release candidate (tag `php:8.6`, and the exact tag follows Alpine's spelling, e.g. `php:8.6.0_rc3`). Treat it as experimental until 8.6.0 ships. The `imagick` extension is not yet packaged for 8.6, and from 8.5 onward OPcache is compiled into PHP itself rather than installed as a separate package.
+Each image is published under two tags: the minor version (`php:8.4`, tracks the latest pinned release) and the exact release (`php:8.4.27`, immutable). Pin the exact tag in production if you want to control when PHP updates roll out.
 
-Each image is published under two tags: the minor version (`php:8.4`, tracks the latest pinned release) and the exact release (`php:8.4.26`, immutable). Pin the exact tag in production if you want to control when PHP updates roll out.
+Pre-releases live on a channel tag. PHP 8.6 is built from Alpine's testing repository while it is a release candidate and published as `php:8.6-rc` (moves with each candidate) plus the exact tag in Alpine's spelling, `php:8.6.0_rc3`. The bare `php:8.6` tag does not exist until 8.6.0 is pinned, so nothing tracking a minor tag can receive a release candidate by accident; when 8.6.0 lands the bump creates `php:8.6` and `php:8.6-rc` stops moving. Treat the channel as experimental: the `imagick` extension is not yet packaged for 8.6, and from 8.5 onward OPcache is compiled into PHP itself rather than installed as a separate package.
 
 ### Image inheritance
 
 ```
 Alpine 3.24
-  └── base (supervisor, bash, curl, git, envsubst, tini)
+  └── base (tini, supercronic, bash, curl, git, envsubst)
         └── php:{version} (PHP CLI, Composer, extensions)
               └── php-nginx:{version} (Nginx, PHP-FPM, SSL support)
                     └── php-nginx-dev:{version} (Xdebug, dev defaults)
@@ -74,10 +74,96 @@ docker run --rm -d -p 80:80 -p 443:443 --user root \
 All images default to running as `appuser` (UID 1000). When running as non-root:
 
 - Ports below 1024 (80, 443) are unavailable — use `8080`, `8443`, etc.
-- Cron is not available — use `--user root` for full Supervisor mode with cron
 - PHP-FPM runs without `user`/`group` directives (automatically stripped)
 
-Use `--user root` when you need privileged ports or cron.
+Use `--user root` when you need privileged ports.
+
+### Metrics
+
+Set `NGINX_METRICS_PORT` to open a second listener with the endpoints exporters expect. It is never served on the application port.
+
+```bash
+docker run --rm -d -p 8080:8080 -p 127.0.0.1:9090:9090 -e NGINX_PORT=8080 -e NGINX_METRICS_PORT=9090 adamrollogi/php-nginx:8.4
+curl -s localhost:9090/nginx_status     # nginx stub_status
+curl -s localhost:9090/fpm-status?json  # PHP-FPM pool status (also ?full)
+curl -s localhost:9090/fpm-ping         # pong
+```
+
+Point `nginx-prometheus-exporter` and `php-fpm_exporter` at those URLs, or restrict access with `NGINX_METRICS_ALLOW` (a CIDR or address, default `all`) and publish the port only on your monitoring network.
+
+### Sending mail
+
+There is no mail server in the images. Point them at one and `mail()`, Laravel's `sendmail` transport and anything else that shells out to sendmail relay through SMTP via msmtp:
+
+```bash
+docker run --rm -d -p 8080:8080 -e NGINX_PORT=8080 \
+  -e SMTP_HOST=smtp.postmarkapp.com -e SMTP_PORT=587 \
+  -e SMTP_USER=token -e SMTP_PASSWORD=token \
+  -e SMTP_FROM=noreply@example.com \
+  adamrollogi/php-nginx:8.4
+```
+
+TLS and authentication default sensibly from the port and the presence of a user (465 implicit TLS, otherwise STARTTLS; AUTH on when `SMTP_USER` is set) and can be forced with `SMTP_TLS`, `SMTP_TLS_STARTTLS` and `SMTP_AUTH`. Setting `PHP_SENDMAIL_PATH` yourself still wins.
+
+### Queue workers and other long-running commands
+
+Set `CLI_COMMAND` on the `php` image and the entrypoint runs it, restarting it whenever it exits, with output tagged `[worker]`:
+
+```bash
+docker run --rm -d -v $(pwd):/app -w /app \
+  -e CLI_COMMAND="php artisan queue:work --max-jobs=500" \
+  adamrollogi/php:8.4
+```
+
+`CLI_RESTART_DELAY` (default 2 seconds) spaces the restarts and `CLI_MAX_RESTARTS` (default 0, unlimited) turns a crash loop into a container exit with the worker's status. An explicit command always wins over `CLI_COMMAND`.
+
+### Startup commands
+
+`APP_INSTALL` runs once before the main command (php) or before the services start (php-nginx), in the document root (`APP_INSTALL_DIR`, default `/app` for php and `/var/www/html` for php-nginx), with output tagged `[install]`. A non-zero exit stops the container with that status, so a failed install never becomes a serving container with half-installed code:
+
+```bash
+docker run --rm -d -p 8080:8080 -e NGINX_PORT=8080 \
+  -e APP_INSTALL="composer install --no-dev --optimize-autoloader && php artisan migrate --force" \
+  -v $(pwd):/var/www/html \
+  adamrollogi/php-nginx:8.4
+```
+
+Composer is pre-configured for containers: `COMPOSER_HOME` and the cache live under `/tmp/composer` so it works for any `--user` and on a read-only root filesystem, it never prompts (`COMPOSER_NO_INTERACTION=1`), skips the funding notice, runs without a memory limit and does not warn in root mode. In your own `Dockerfile`, keep the cache between builds with:
+
+```dockerfile
+FROM adamrollogi/php:8.4
+COPY --chown=appuser composer.json composer.lock ./
+RUN --mount=type=cache,target=/tmp/composer/cache,uid=1000 composer install --no-dev --no-scripts
+```
+
+### Cron
+
+Cron runs as the unprivileged user through [supercronic](https://github.com/aptible/supercronic), with job output in the container log tagged `[cron]`. Either set a single job:
+
+```bash
+docker run --rm -d -p 8080:8080 -e NGINX_PORT=8080 \
+  -e CRON_SCHEDULE="* * * * *" \
+  -e CRON_COMMAND="php /var/www/html/artisan schedule:run" \
+  -v $(pwd):/var/www/html \
+  adamrollogi/php-nginx:8.4
+```
+
+or mount a full crontab at `/etc/crontabs/app` (override the path with `CRONTAB_FILE`). Both can be combined. Schedules accept the standard five fields, or seven with leading seconds and trailing year. For a dedicated scheduler container, run the CLI image with the `cron` command:
+
+```bash
+docker run --rm -d -e CRON_SCHEDULE="* * * * *" -e CRON_COMMAND="php /app/artisan schedule:run" -v $(pwd):/app adamrollogi/php:8.4 cron
+```
+
+### Matching your host user
+
+Bind-mounted files are read and written as UID 1000. For local development with a different host UID, either run with `--user "$(id -u):$(id -g)"`, which works out of the box because the runtime state directories (`/run/php`, `/run/nginx`, `/run/cron`, `/var/log`, `/var/lib/nginx`) are sticky and world-writable like `/tmp`, or bake your IDs into the base image so every derived image inherits them:
+
+```bash
+docker build --build-arg APP_UID=$(id -u) --build-arg APP_GID=$(id -g) -t adamrollogi/base:latest ./alpine/base
+APP_UID=$(id -u) APP_GID=$(id -g) ./alpine/build.sh    # or the whole set
+```
+
+The chosen IDs are exported as `APP_UID` and `APP_GID` inside the containers. Adjust the `uid=`/`gid=` options in the read-only recipe to match.
 
 ### Running with a read-only root filesystem
 
@@ -147,7 +233,6 @@ Everything logs to the container's stdout and stderr by default, and every line 
 | `[php-fpm]` | stderr | FPM master and pool messages, PHP `error_log()` output, slow-request traces |
 | `[cron]` | stderr | crond output (root mode only) |
 | `[entrypoint]` | stdout | startup messages from the entrypoint scripts |
-| *(untagged)* | stderr | supervisord's own messages (root mode only), e.g. `INFO spawned: 'nginx'` |
 
 ```bash
 docker logs -f app 2>&1                        # everything
@@ -172,7 +257,7 @@ docker logs app 2>&1 | jq -c 'select(.service == "nginx" and .status >= 500)'
 **File mode** (`LOG_MODE=file`) writes `/var/log/nginx/access.log`, `/var/log/nginx/error.log`, `/var/log/php-fpm/error.log` and `/var/log/php-fpm/slow.log`, with no tags. Mount `/var/log` to keep them, and tail them in place with the bundled helper:
 
 ```bash
-docker exec app container-logs -f php-fpm     # nginx | php-fpm | cron | supervisor | all
+docker exec app container-logs -f php-fpm     # nginx | php-fpm | cron | all
 ```
 
 Individual destinations can still be overridden with `NGINX_ACCESS_LOG` (`off` disables it), `NGINX_ERROR_LOG`, `PHP_FPM_ERROR_LOG` and `PHP_FPM_SLOWLOG`.
@@ -265,6 +350,17 @@ See [ENV.md](ENV.md) for the complete variable reference including OPcache, secu
 
 bcmath, ctype, curl, dom, exif, fileinfo, gd, iconv, intl, json, mbstring, mysqli, opcache, pcntl, pdo, pdo_mysql, phar, posix, redis, session, simplexml, soap, tokenizer, xml, xmlreader, xmlwriter, zip, imagick
 
+Need more? Build your own variant with `PHP_EXTRA_EXTENSIONS`; core extensions are pinned to the PHP release and PECL ones resolve automatically:
+
+```bash
+docker build --build-arg PHP_VERSION=84 --build-arg PHP_PATCH_VERSION=8.4.27 \
+  --build-arg PHP_EXTRA_EXTENSIONS="pgsql pdo_pgsql ldap memcached apcu amqp yaml" \
+  -t myorg/php:8.4 ./alpine/php
+PHP_EXTRA_EXTENSIONS="pgsql pdo_pgsql" ./alpine/build.sh    # whole set
+```
+
+An unavailable extension fails the build with the package names it tried, and the chosen set is recorded in the `io.rollogi.php.extra-extensions` label.
+
 `opcache` and `imagick` are installed when Alpine packages them for the PHP version (opcache is built in from 8.5; imagick is missing on 8.6 for now). The build logs a notice rather than failing when one is unavailable.
 
 ## Security
@@ -281,7 +377,7 @@ bcmath, ctype, curl, dom, exif, fileinfo, gd, iconv, intl, json, mbstring, mysql
 - HTTP-to-HTTPS redirect targets a configured host rather than reflecting the request `Host` header
 - Base image pins to Alpine digest for supply chain integrity, Alpine repositories fetched over HTTPS
 - CI builds every image under a candidate tag, scans it with Trivy, and only promotes it to the public tags when the scan passes
-- SBOM, provenance and VEX attestations on every image; images are rebuilt weekly so Alpine fixes ship without a code change
+- SBOM, provenance and VEX attestations on every image, plus a keyless Sigstore signature from the build workflow's identity (`cosign verify`); images are rebuilt weekly so Alpine fixes ship without a code change
 
 See [SECURITY.md](SECURITY.md) for CVE details and VEX attestations.
 
@@ -310,7 +406,16 @@ alpine/check-php-versions.sh
 alpine/check-php-versions.sh --update
 ```
 
-You can also trigger the bump workflow from the Actions tab via "Run workflow".
+You can also trigger the bump workflow from the Actions tab via "Run workflow". Every bump is recorded on the [changelog](https://docker.rollogi.co.uk/releases/changelog) and, once built, gets a GitHub release with the image digests.
+
+### Test the images
+
+```bash
+alpine/test.sh all 8.4        # every check against the local adamrollogi/*:8.4 images
+alpine/test.sh php-nginx adamrollogi/php-nginx:8.4 8.4.27
+```
+
+CI runs the same script against every candidate image before it is promoted, so a regression in health checks, extensions, package consistency, hardening or logging blocks the publish.
 
 ### Build a single image
 
@@ -337,11 +442,13 @@ docker build \
 
 GitHub Actions (`.github/workflows/docker-build.yml`) builds and publishes all images on push to `main`:
 
-- Multi-arch builds with buildx (`docker-container` driver), arm64 via QEMU, layers cached in GitHub Actions cache
+- Native multi-arch builds: amd64 and arm64 each on their own runner with buildx (`docker-container` driver), no QEMU, layers cached in the GitHub Actions cache
+- Every image is scanned and smoke tested on both architectures before its digest is joined into a manifest list and promoted
 - PHP versions build in parallel (matrix generated from `alpine/php-versions.txt`)
 - SBOM and provenance attestation on every image
 - VEX attestations for known false positives
 - Trivy vulnerability scanning (fails on CRITICAL/HIGH)
+- A GitHub release per published PHP release (`php-8.4.27`) with image digests, and optional webhook notifications (`NOTIFY_WEBHOOK_URL` secret) on bumps, publishes and failures
 
 ## License
 

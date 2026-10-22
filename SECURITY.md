@@ -10,7 +10,7 @@ When adding new suppressions, add a statement to the existing `openvex.json` rat
 
 ### CVE-2023-27482 — Home Assistant Supervisor (does NOT affect these images)
 
-**Status:** Suppressed via [OpenVEX](.vex/openvex.json)
+**Status:** No longer applicable — the `supervisor` package was removed in October 2026 (the entrypoint supervises processes itself, which also removed Python from the images). The VEX statement has been retired.
 
 Docker Scout flags CVE-2023-27482 against our images because the Alpine `supervisor` APK package shares a name with Home Assistant's Supervisor component. This is a **confirmed false positive**.
 
@@ -79,7 +79,7 @@ Alpine 3.21 shipped curl 8.14.1, which contained 7 vulnerabilities (6 MEDIUM, 1 
 
 ### CVE-2025-47273, CVE-2026-59890 — setuptools Path Traversal and MANIFEST.in Exclusion Bypass
 
-**Status:** Fixed — setuptools upgraded to >= 83.0.0 in base image
+**Status:** No longer applicable — Python and setuptools were removed from the images in October 2026 along with supervisord. The history below is kept for reference.
 
 CVE-2025-47273 is a path traversal in setuptools' `PackageIndex.download()` (fixed in 78.1.1). CVE-2026-59890 is a MANIFEST.in exclusion bypass when building a source distribution (fixed in 83.0.0). Alpine 3.24's `py3-setuptools` ships 82.0.1, which is still affected by the latter.
 

@@ -1,6 +1,8 @@
 ARG PHP_IMAGE_TAG=8.4
+# Full reference of the php-nginx image to build on (see php-nginx/Dockerfile)
+ARG PHP_IMAGE=adamrollogi/php-nginx:${PHP_IMAGE_TAG}
 
-FROM adamrollogi/php-nginx:${PHP_IMAGE_TAG}
+FROM ${PHP_IMAGE}
 
 # Switch to root for package installation
 USER root
@@ -35,6 +37,7 @@ RUN set -eux; \
     rm -f /etc/php${PHP_VERSION}/conf.d/*xdebug*.ini; \
     mkdir -p /run/php/conf.d; \
     chown appuser:appuser /run/php/conf.d; \
+    chmod 1777 /run/php/conf.d; \
     find / -xdev -type f -perm /6000 -exec chmod a-s {} +
 
 # OCI metadata labels
@@ -53,5 +56,5 @@ USER appuser
 
 ENTRYPOINT ["/sbin/tini", "--", "php-nginx-dev-entrypoint.sh"]
 
-# Start Supervisord
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]
+# Same as php-nginx: "serve" runs the stack under the entrypoint's supervision
+CMD ["serve"]
