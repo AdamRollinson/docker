@@ -35,9 +35,9 @@ RUN apk upgrade --no-cache && \
     mkdir -p /var/log
 
 # OCI metadata labels
-LABEL org.opencontainers.image.title="adamrollogi/base" \
+LABEL org.opencontainers.image.title="rollogi/base" \
       org.opencontainers.image.description="Alpine 3.24 base with tini, supercronic and common tools" \
-      org.opencontainers.image.source="https://github.com/adamrollogi/docker" \
+      org.opencontainers.image.source="https://github.com/AdamRollinson/docker" \
       org.opencontainers.image.licenses="MIT"
 
 # Create the non-root application user. Override the IDs at build time so bind-mounted

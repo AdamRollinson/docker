@@ -21,7 +21,7 @@ Docker Scout flags CVE-2023-27482 against our images because the Alpine `supervi
 - These are entirely different software projects that happen to share a package name.
 - Zero Home Assistant code exists in any of our images.
 
-**Affected images:** `adamrollogi/base`, `adamrollogi/php`, `adamrollogi/php-nginx`
+**Affected images:** `rollogi/base`, `rollogi/php`, `rollogi/php-nginx`
 
 **References:**
 
@@ -44,7 +44,7 @@ Alpine 3.24 ships BusyBox 1.37.0, which contains the vulnerable applet. As of Fe
 - No entrypoint script, build step, or runtime process in any image layer invokes `wget` — all HTTP operations use `curl`.
 - BusyBox cannot be removed as it provides Alpine's coreutils, but the vulnerable `wget` applet within it is never executed.
 
-**Affected images:** `adamrollogi/base`, `adamrollogi/php`, `adamrollogi/php-nginx`
+**Affected images:** `rollogi/base`, `rollogi/php`, `rollogi/php-nginx`
 
 **When to revisit:** If Alpine releases a patched BusyBox package (check `apk info busybox` or the [Alpine Security Tracker](https://security.alpinelinux.org/package/busybox)), the VEX suppression can be removed. Alternatively, if a future change introduces any use of BusyBox wget, the suppression must be re-evaluated.
 
@@ -70,7 +70,7 @@ Alpine 3.21 shipped curl 8.14.1, which contained 7 vulnerabilities (6 MEDIUM, 1 
 | CVE-2025-10966 | MEDIUM | wolfSSH SFTP host verification missing |
 | CVE-2025-15224 | LOW | SCP/SFTP public key auth bypass via SSH agent |
 
-**Affected images:** `adamrollogi/base`, `adamrollogi/php`, `adamrollogi/php-nginx`
+**Affected images:** `rollogi/base`, `rollogi/php`, `rollogi/php-nginx`
 
 **References:**
 
@@ -87,7 +87,7 @@ Setuptools is present only as a dependency of the `supervisor` APK package. Neit
 
 Earlier images on Alpine 3.21 had to cap the upgrade below 81 because supervisor 4.2.5 imported `pkg_resources`, which setuptools 81 removed. Alpine 3.23 and 3.24 ship supervisor 4.3.0, which loads entry points through `importlib.metadata`, so the cap has been dropped.
 
-**Affected images:** `adamrollogi/base`, `adamrollogi/php`, `adamrollogi/php-nginx`
+**Affected images:** `rollogi/base`, `rollogi/php`, `rollogi/php-nginx`
 
 **References:**
 
@@ -103,7 +103,7 @@ The pinned `alpine:3.21` digest shipped `musl-utils` 1.2.5-r9, which Trivy flagg
 
 The php and php-nginx Dockerfiles already ran `apk upgrade`, so only the standalone base image was affected. The base Dockerfile now upgrades the installed Alpine packages before adding its own, so every published image receives Alpine security updates at build time regardless of how old the pinned digest is.
 
-**Affected images:** `adamrollogi/base`
+**Affected images:** `rollogi/base`
 
 **References:**
 

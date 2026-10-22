@@ -33,7 +33,7 @@ Alpine-based images for PHP 8.2 to 8.6 on amd64 and arm64. Every release is pinn
   color: neutral
   variant: outline
   size: xl
-  to: https://hub.docker.com/u/adamrollogi
+  to: https://hub.docker.com/u/rollogi
   target: _blank
   ---
   Docker Hub
@@ -46,7 +46,7 @@ Alpine-based images for PHP 8.2 to 8.6 on amd64 and arm64. Every release is pinn
     docker run --rm -d -p 8080:8080 \
       -e NGINX_PORT=8080 \
       -v $(pwd):/var/www/html:ro \
-      adamrollogi/php-nginx:8.4
+      rollogi/php-nginx:8.4
   filename: Terminal
   ---
 
@@ -54,7 +54,7 @@ Alpine-based images for PHP 8.2 to 8.6 on amd64 and arm64. Every release is pinn
   docker run --rm -d -p 8080:8080 \
     -e NGINX_PORT=8080 \
     -v $(pwd):/var/www/html:ro \
-    adamrollogi/php-nginx:8.4
+    rollogi/php-nginx:8.4
   ```
   :::
 ::

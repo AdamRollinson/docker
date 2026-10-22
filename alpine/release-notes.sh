@@ -9,7 +9,7 @@
 set -euo pipefail
 
 minor=${1:?minor}; patch=${2:?patch}; tag=${3:?moving tag}; sha=${4:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}
-registry="${DOCKER_REGISTRY:-adamrollogi}"
+registry="${DOCKER_REGISTRY:-rollogi}"
 repo_url="${REPO_URL:-https://github.com/AdamRollinson/docker}"
 
 rows=""

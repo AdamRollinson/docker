@@ -1,6 +1,6 @@
 ARG PHP_IMAGE_TAG=8.4
 # Full reference of the php-nginx image to build on (see php-nginx/Dockerfile)
-ARG PHP_IMAGE=adamrollogi/php-nginx:${PHP_IMAGE_TAG}
+ARG PHP_IMAGE=rollogi/php-nginx:${PHP_IMAGE_TAG}
 
 FROM ${PHP_IMAGE}
 
@@ -41,10 +41,10 @@ RUN set -eux; \
     find / -xdev -type f -perm /6000 -exec chmod a-s {} +
 
 # OCI metadata labels
-LABEL org.opencontainers.image.title="adamrollogi/php-nginx-dev" \
+LABEL org.opencontainers.image.title="rollogi/php-nginx-dev" \
       org.opencontainers.image.description="PHP-FPM + Nginx development stack with Xdebug on Alpine 3.24" \
       org.opencontainers.image.version="${PHP_PATCH_VERSION}" \
-      org.opencontainers.image.source="https://github.com/adamrollogi/docker" \
+      org.opencontainers.image.source="https://github.com/AdamRollinson/docker" \
       org.opencontainers.image.licenses="MIT"
 
 COPY xdebug.ini.template no-cache.conf.template /usr/local/etc/php-nginx-dev/

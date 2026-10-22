@@ -1,6 +1,6 @@
 # Docker PHP Images
 
-Multi-architecture (amd64/arm64) PHP container images built on Alpine Linux 3.24 and published to Docker Hub under `adamrollogi/`.
+Multi-architecture (amd64/arm64) PHP container images built on Alpine Linux 3.24 and published to Docker Hub under `rollogi/`.
 
 Full documentation: https://docker.rollogi.co.uk (source in `docs/`). This README is the short version.
 
@@ -8,10 +8,10 @@ Full documentation: https://docker.rollogi.co.uk (source in `docs/`). This READM
 
 | Image | Description |
 |-------|-------------|
-| `adamrollogi/base:latest` | Alpine 3.24 base with tini, supercronic, bash, curl, git |
-| `adamrollogi/php:{version}` | PHP CLI with Composer and common extensions |
-| `adamrollogi/php-nginx:{version}` | PHP-FPM + Nginx web stack with optional HTTPS |
-| `adamrollogi/php-nginx-dev:{version}` | php-nginx plus Xdebug, visible errors and uncached assets, for local development |
+| `rollogi/base:latest` | Alpine 3.24 base with tini, supercronic, bash, curl, git |
+| `rollogi/php:{version}` | PHP CLI with Composer and common extensions |
+| `rollogi/php-nginx:{version}` | PHP-FPM + Nginx web stack with optional HTTPS |
+| `rollogi/php-nginx-dev:{version}` | php-nginx plus Xdebug, visible errors and uncached assets, for local development |
 
 **Supported PHP versions:** 8.2, 8.3, 8.4, 8.5, and 8.6 as a pre-release
 
@@ -34,7 +34,7 @@ Alpine 3.24
 ### PHP CLI
 
 ```bash
-docker run --rm adamrollogi/php:8.4 php -v
+docker run --rm rollogi/php:8.4 php -v
 ```
 
 ### PHP-FPM + Nginx (HTTP)
@@ -43,7 +43,7 @@ docker run --rm adamrollogi/php:8.4 php -v
 docker run --rm -d -p 8080:8080 \
   -e NGINX_PORT=8080 \
   -v $(pwd):/var/www/html \
-  adamrollogi/php-nginx:8.4
+  rollogi/php-nginx:8.4
 ```
 
 ### PHP-FPM + Nginx (HTTPS with self-signed cert)
@@ -55,7 +55,7 @@ docker run --rm -d -p 8080:8080 -p 8443:8443 \
   -e NGINX_SSL_PORT=8443 \
   -e NGINX_SSL_SELF_SIGNED=true \
   -v $(pwd):/var/www/html \
-  adamrollogi/php-nginx:8.4
+  rollogi/php-nginx:8.4
 ```
 
 ### PHP-FPM + Nginx (HTTPS with your own certificate)
@@ -66,7 +66,7 @@ docker run --rm -d -p 80:80 -p 443:443 --user root \
   -v /path/to/cert.pem:/etc/nginx/ssl/cert.pem:ro \
   -v /path/to/key.pem:/etc/nginx/ssl/key.pem:ro \
   -v $(pwd):/var/www/html \
-  adamrollogi/php-nginx:8.4
+  rollogi/php-nginx:8.4
 ```
 
 ## Non-root by default
@@ -83,7 +83,7 @@ Use `--user root` when you need privileged ports.
 Set `NGINX_METRICS_PORT` to open a second listener with the endpoints exporters expect. It is never served on the application port.
 
 ```bash
-docker run --rm -d -p 8080:8080 -p 127.0.0.1:9090:9090 -e NGINX_PORT=8080 -e NGINX_METRICS_PORT=9090 adamrollogi/php-nginx:8.4
+docker run --rm -d -p 8080:8080 -p 127.0.0.1:9090:9090 -e NGINX_PORT=8080 -e NGINX_METRICS_PORT=9090 rollogi/php-nginx:8.4
 curl -s localhost:9090/nginx_status     # nginx stub_status
 curl -s localhost:9090/fpm-status?json  # PHP-FPM pool status (also ?full)
 curl -s localhost:9090/fpm-ping         # pong
@@ -100,7 +100,7 @@ docker run --rm -d -p 8080:8080 -e NGINX_PORT=8080 \
   -e SMTP_HOST=smtp.postmarkapp.com -e SMTP_PORT=587 \
   -e SMTP_USER=token -e SMTP_PASSWORD=token \
   -e SMTP_FROM=noreply@example.com \
-  adamrollogi/php-nginx:8.4
+  rollogi/php-nginx:8.4
 ```
 
 TLS and authentication default sensibly from the port and the presence of a user (465 implicit TLS, otherwise STARTTLS; AUTH on when `SMTP_USER` is set) and can be forced with `SMTP_TLS`, `SMTP_TLS_STARTTLS` and `SMTP_AUTH`. Setting `PHP_SENDMAIL_PATH` yourself still wins.
@@ -112,7 +112,7 @@ Set `CLI_COMMAND` on the `php` image and the entrypoint runs it, restarting it w
 ```bash
 docker run --rm -d -v $(pwd):/app -w /app \
   -e CLI_COMMAND="php artisan queue:work --max-jobs=500" \
-  adamrollogi/php:8.4
+  rollogi/php:8.4
 ```
 
 `CLI_RESTART_DELAY` (default 2 seconds) spaces the restarts and `CLI_MAX_RESTARTS` (default 0, unlimited) turns a crash loop into a container exit with the worker's status. An explicit command always wins over `CLI_COMMAND`.
@@ -125,13 +125,13 @@ docker run --rm -d -v $(pwd):/app -w /app \
 docker run --rm -d -p 8080:8080 -e NGINX_PORT=8080 \
   -e APP_INSTALL="composer install --no-dev --optimize-autoloader && php artisan migrate --force" \
   -v $(pwd):/var/www/html \
-  adamrollogi/php-nginx:8.4
+  rollogi/php-nginx:8.4
 ```
 
 Composer is pre-configured for containers: `COMPOSER_HOME` and the cache live under `/tmp/composer` so it works for any `--user` and on a read-only root filesystem, it never prompts (`COMPOSER_NO_INTERACTION=1`), skips the funding notice, runs without a memory limit and does not warn in root mode. In your own `Dockerfile`, keep the cache between builds with:
 
 ```dockerfile
-FROM adamrollogi/php:8.4
+FROM rollogi/php:8.4
 COPY --chown=appuser composer.json composer.lock ./
 RUN --mount=type=cache,target=/tmp/composer/cache,uid=1000 composer install --no-dev --no-scripts
 ```
@@ -145,13 +145,13 @@ docker run --rm -d -p 8080:8080 -e NGINX_PORT=8080 \
   -e CRON_SCHEDULE="* * * * *" \
   -e CRON_COMMAND="php /var/www/html/artisan schedule:run" \
   -v $(pwd):/var/www/html \
-  adamrollogi/php-nginx:8.4
+  rollogi/php-nginx:8.4
 ```
 
 or mount a full crontab at `/etc/crontabs/app` (override the path with `CRONTAB_FILE`). Both can be combined. Schedules accept the standard five fields, or seven with leading seconds and trailing year. For a dedicated scheduler container, run the CLI image with the `cron` command:
 
 ```bash
-docker run --rm -d -e CRON_SCHEDULE="* * * * *" -e CRON_COMMAND="php /app/artisan schedule:run" -v $(pwd):/app adamrollogi/php:8.4 cron
+docker run --rm -d -e CRON_SCHEDULE="* * * * *" -e CRON_COMMAND="php /app/artisan schedule:run" -v $(pwd):/app rollogi/php:8.4 cron
 ```
 
 ### Matching your host user
@@ -159,7 +159,7 @@ docker run --rm -d -e CRON_SCHEDULE="* * * * *" -e CRON_COMMAND="php /app/artisa
 Bind-mounted files are read and written as UID 1000. For local development with a different host UID, either run with `--user "$(id -u):$(id -g)"`, which works out of the box because the runtime state directories (`/run/php`, `/run/nginx`, `/run/cron`, `/var/log`, `/var/lib/nginx`) are sticky and world-writable like `/tmp`, or bake your IDs into the base image so every derived image inherits them:
 
 ```bash
-docker build --build-arg APP_UID=$(id -u) --build-arg APP_GID=$(id -g) -t adamrollogi/base:latest ./alpine/base
+docker build --build-arg APP_UID=$(id -u) --build-arg APP_GID=$(id -g) -t rollogi/base:latest ./alpine/base
 APP_UID=$(id -u) APP_GID=$(id -g) ./alpine/build.sh    # or the whole set
 ```
 
@@ -179,7 +179,7 @@ docker run --rm -d -p 8080:8080 \
   --tmpfs /tmp \
   --cap-drop ALL --security-opt no-new-privileges \
   -v $(pwd):/var/www/html:ro \
-  adamrollogi/php-nginx:8.4
+  rollogi/php-nginx:8.4
 ```
 
 The `uid`/`gid` options are required because Docker mounts tmpfs as root-owned by default. Add `--tmpfs /etc/nginx/ssl:uid=1000,gid=1000` if you use `NGINX_SSL_SELF_SIGNED=true`.
@@ -191,7 +191,7 @@ docker run --rm -d -p 8080:8080 \
   -e NGINX_PORT=8080 \
   -e XDEBUG_START_WITH_REQUEST=yes \
   -v $(pwd):/var/www/html \
-  adamrollogi/php-nginx-dev:8.4
+  rollogi/php-nginx-dev:8.4
 ```
 
 Xdebug connects back to `host.docker.internal:9003` by default and only starts when triggered (browser extension, `XDEBUG_TRIGGER` cookie or query string). Set `XDEBUG_START_WITH_REQUEST=yes` to debug every request, or `PHP_DEBUGGER=none` to leave Xdebug unloaded. Static assets are served with `Cache-Control: no-store` so edits show up immediately.
@@ -411,8 +411,8 @@ You can also trigger the bump workflow from the Actions tab via "Run workflow". 
 ### Test the images
 
 ```bash
-alpine/test.sh all 8.4        # every check against the local adamrollogi/*:8.4 images
-alpine/test.sh php-nginx adamrollogi/php-nginx:8.4 8.4.27
+alpine/test.sh all 8.4        # every check against the local rollogi/*:8.4 images
+alpine/test.sh php-nginx rollogi/php-nginx:8.4 8.4.27
 ```
 
 CI runs the same script against every candidate image before it is promoted, so a regression in health checks, extensions, package consistency, hardening or logging blocks the publish.
@@ -421,20 +421,20 @@ CI runs the same script against every candidate image before it is promoted, so 
 
 ```bash
 # Base
-docker build -t adamrollogi/base:latest ./alpine/base
+docker build -t rollogi/base:latest ./alpine/base
 
 # PHP 8.4 (omit PHP_PATCH_VERSION to install whatever Alpine currently has)
 docker build \
   --build-arg PHP_VERSION=84 \
   --build-arg PHP_PATCH_VERSION=8.4.26 \
-  -t adamrollogi/php:8.4 \
+  -t rollogi/php:8.4 \
   ./alpine/php
 
 # PHP-Nginx 8.4 (php-fpm is pinned to the release baked into the php image)
 docker build \
   --build-arg PHP_IMAGE_TAG=8.4 \
   --build-arg PHP_VERSION=84 \
-  -t adamrollogi/php-nginx:8.4 \
+  -t rollogi/php-nginx:8.4 \
   ./alpine/php-nginx
 ```
 

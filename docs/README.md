@@ -1,6 +1,6 @@
 # Rollogi Docker Images documentation
 
-Documentation site for the `adamrollogi/base`, `php`, `php-nginx` and `php-nginx-dev` images. Built with Nuxt 4, Nuxt UI and Nuxt Content, generated statically and served from Cloudflare Workers as static assets.
+Documentation site for the `rollogi/base`, `php`, `php-nginx` and `php-nginx-dev` images. Built with Nuxt 4, Nuxt UI and Nuxt Content, generated statically and served from Cloudflare Workers as static assets.
 
 ## Local development
 
