@@ -97,23 +97,20 @@ jobs:
           version: ${{ env.BUILDX_VERSION }}
           driver: docker-container
 
-      - name: Build Base Image (${{ matrix.arch }}) by digest
-        id: build
+      - name: Build Base Image (${{ matrix.arch }}) locally
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           platforms: ${{ matrix.platform }}
           context: ./alpine/base
           cache-from: type=gha,scope=base-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=base-${{ matrix.arch }}
-          # Two exporters: the registry copy by digest (listed last, so the digest the action reports
-          # is the pushed one) and a local copy that Trivy and test.sh use without pulling from Hub
-          outputs: |
-            type=docker,name=local/${{ env.BASE_IMAGE }}
-            type=image,name=${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }},push-by-digest=true,name-canonical=true,push=true
-          provenance: true
-          sbom: true
+          load: true
+          tags: local/${{ env.BASE_IMAGE }}
+          provenance: false
+          sbom: false
 
-      # Scan and test the local copy on this architecture before the digest can become part of a public tag
+      # The local copy is built without attestations (the runner's daemon cannot load a manifest list),
+      # scanned and tested here, and only then rebuilt from the cache and pushed by digest
       - name: Run Trivy vulnerability scanner on Base Image (${{ matrix.arch }})
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -125,6 +122,19 @@ jobs:
 
       - name: Smoke test Base Image (${{ matrix.arch }})
         run: alpine/test.sh base local/${{ env.BASE_IMAGE }}
+
+      # The same build again from the cache, with attestations, pushed by digest only now that the
+      # local copy has passed the scan and the smoke tests
+      - name: Build Base Image (${{ matrix.arch }}) by digest
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          platforms: ${{ matrix.platform }}
+          context: ./alpine/base
+          cache-from: type=gha,scope=base-${{ matrix.arch }}
+          outputs: type=image,name=${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          provenance: true
+          sbom: true
 
       - name: Export digest
         run: |
@@ -239,8 +249,7 @@ jobs:
         run: echo "PHP_VERSION=$(echo ${{ matrix.minor }} | tr -d '.')" >> $GITHUB_ENV
 
       # ---- PHP image ----------------------------------------------------------
-      - name: Build PHP Image (${{ matrix.minor }}, ${{ matrix.arch }}) by digest
-        id: php
+      - name: Build PHP Image (${{ matrix.minor }}, ${{ matrix.arch }}) locally
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           platforms: ${{ matrix.platform }}
@@ -251,11 +260,10 @@ jobs:
           build-args: |
             PHP_VERSION=${{ env.PHP_VERSION }}
             PHP_PATCH_VERSION=${{ matrix.patch }}
-          outputs: |
-            type=docker,name=local/${{ env.PHP_IMAGE }}
-            type=image,name=${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }},push-by-digest=true,name-canonical=true,push=true
-          provenance: true
-          sbom: true
+          load: true
+          tags: local/${{ env.PHP_IMAGE }}
+          provenance: false
+          sbom: false
 
       - name: Run Trivy vulnerability scanner on PHP Image (${{ matrix.minor }}, ${{ matrix.arch }})
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -269,9 +277,24 @@ jobs:
       - name: Smoke test PHP Image (${{ matrix.minor }}, ${{ matrix.arch }})
         run: alpine/test.sh php local/${{ env.PHP_IMAGE }} ${{ matrix.patch }}
 
+      # The same build again from the cache, with attestations, pushed by digest only now that the
+      # local copy has passed the scan and the smoke tests
+      - name: Build PHP Image (${{ matrix.minor }}, ${{ matrix.arch }}) by digest
+        id: php
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          platforms: ${{ matrix.platform }}
+          context: ./alpine/php
+          cache-from: type=gha,scope=php-${{ matrix.minor }}-${{ matrix.arch }}
+          build-args: |
+            PHP_VERSION=${{ env.PHP_VERSION }}
+            PHP_PATCH_VERSION=${{ matrix.patch }}
+          outputs: type=image,name=${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          provenance: true
+          sbom: true
+
       # ---- PHP-NGINX image (FROM the php digest above) -------------------------
-      - name: Build PHP-NGINX Image (${{ matrix.minor }}, ${{ matrix.arch }}) by digest
-        id: php-nginx
+      - name: Build PHP-NGINX Image (${{ matrix.minor }}, ${{ matrix.arch }}) locally
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           platforms: ${{ matrix.platform }}
@@ -282,11 +305,10 @@ jobs:
             PHP_IMAGE=${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}@${{ steps.php.outputs.digest }}
             PHP_IMAGE_TAG=${{ matrix.tag }}
             PHP_VERSION=${{ env.PHP_VERSION }}
-          outputs: |
-            type=docker,name=local/${{ env.PHP_NGINX_IMAGE }}
-            type=image,name=${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }},push-by-digest=true,name-canonical=true,push=true
-          provenance: true
-          sbom: true
+          load: true
+          tags: local/${{ env.PHP_NGINX_IMAGE }}
+          provenance: false
+          sbom: false
 
       - name: Run Trivy vulnerability scanner on PHP-NGINX Image (${{ matrix.minor }}, ${{ matrix.arch }})
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -300,9 +322,25 @@ jobs:
       - name: Smoke test PHP-NGINX Image (${{ matrix.minor }}, ${{ matrix.arch }})
         run: alpine/test.sh php-nginx local/${{ env.PHP_NGINX_IMAGE }} ${{ matrix.patch }}
 
+      # The same build again from the cache, with attestations, pushed by digest only now that the
+      # local copy has passed the scan and the smoke tests
+      - name: Build PHP-NGINX Image (${{ matrix.minor }}, ${{ matrix.arch }}) by digest
+        id: php-nginx
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          platforms: ${{ matrix.platform }}
+          context: ./alpine/php-nginx
+          cache-from: type=gha,scope=php-nginx-${{ matrix.minor }}-${{ matrix.arch }}
+          build-args: |
+            PHP_IMAGE=${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}@${{ steps.php.outputs.digest }}
+            PHP_IMAGE_TAG=${{ matrix.tag }}
+            PHP_VERSION=${{ env.PHP_VERSION }}
+          outputs: type=image,name=${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          provenance: true
+          sbom: true
+
       # ---- PHP-NGINX-DEV image (FROM the php-nginx digest above) ---------------
-      - name: Build PHP-NGINX-DEV Image (${{ matrix.minor }}, ${{ matrix.arch }}) by digest
-        id: php-nginx-dev
+      - name: Build PHP-NGINX-DEV Image (${{ matrix.minor }}, ${{ matrix.arch }}) locally
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           platforms: ${{ matrix.platform }}
@@ -313,11 +351,10 @@ jobs:
             PHP_IMAGE=${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}@${{ steps.php-nginx.outputs.digest }}
             PHP_IMAGE_TAG=${{ matrix.tag }}
             PHP_VERSION=${{ env.PHP_VERSION }}
-          outputs: |
-            type=docker,name=local/${{ env.PHP_NGINX_DEV_IMAGE }}
-            type=image,name=${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }},push-by-digest=true,name-canonical=true,push=true
-          provenance: true
-          sbom: true
+          load: true
+          tags: local/${{ env.PHP_NGINX_DEV_IMAGE }}
+          provenance: false
+          sbom: false
 
       - name: Run Trivy vulnerability scanner on PHP-NGINX-DEV Image (${{ matrix.minor }}, ${{ matrix.arch }})
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -330,6 +367,23 @@ jobs:
 
       - name: Smoke test PHP-NGINX-DEV Image (${{ matrix.minor }}, ${{ matrix.arch }})
         run: alpine/test.sh php-nginx-dev local/${{ env.PHP_NGINX_DEV_IMAGE }} ${{ matrix.patch }}
+
+      # The same build again from the cache, with attestations, pushed by digest only now that the
+      # local copy has passed the scan and the smoke tests
+      - name: Build PHP-NGINX-DEV Image (${{ matrix.minor }}, ${{ matrix.arch }}) by digest
+        id: php-nginx-dev
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          platforms: ${{ matrix.platform }}
+          context: ./alpine/php-nginx-dev
+          cache-from: type=gha,scope=php-nginx-dev-${{ matrix.minor }}-${{ matrix.arch }}
+          build-args: |
+            PHP_IMAGE=${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}@${{ steps.php-nginx.outputs.digest }}
+            PHP_IMAGE_TAG=${{ matrix.tag }}
+            PHP_VERSION=${{ env.PHP_VERSION }}
+          outputs: type=image,name=${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          provenance: true
+          sbom: true
 
       # One file per image, named "<image> <digest>", so the publish job can join them
       - name: Export digests
