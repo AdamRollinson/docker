@@ -119,6 +119,8 @@ jobs:
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           ignore-unfixed: true
+        env:
+          TRIVY_PLATFORM: ${{ matrix.platform }}
 
       - name: Smoke test Base Image (${{ matrix.arch }})
         run: alpine/test.sh base ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}@${{ steps.build.outputs.digest }}
@@ -261,6 +263,8 @@ jobs:
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           ignore-unfixed: true
+        env:
+          TRIVY_PLATFORM: ${{ matrix.platform }}
 
       - name: Smoke test PHP Image (${{ matrix.minor }}, ${{ matrix.arch }})
         run: alpine/test.sh php ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}@${{ steps.php.outputs.digest }} ${{ matrix.patch }}
@@ -291,6 +295,8 @@ jobs:
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           ignore-unfixed: true
+        env:
+          TRIVY_PLATFORM: ${{ matrix.platform }}
 
       - name: Smoke test PHP-NGINX Image (${{ matrix.minor }}, ${{ matrix.arch }})
         run: alpine/test.sh php-nginx ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}@${{ steps.php-nginx.outputs.digest }} ${{ matrix.patch }}
@@ -321,6 +327,8 @@ jobs:
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           ignore-unfixed: true
+        env:
+          TRIVY_PLATFORM: ${{ matrix.platform }}
 
       - name: Smoke test PHP-NGINX-DEV Image (${{ matrix.minor }}, ${{ matrix.arch }})
         run: alpine/test.sh php-nginx-dev ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}@${{ steps.php-nginx-dev.outputs.digest }} ${{ matrix.patch }}
@@ -350,7 +358,7 @@ jobs:
   # a minor whose build legs failed has no digests and fails here on its own.
   publish-php:
     needs: [php-matrix, build-php]
-    if: ${{ !cancelled() && needs.php-matrix.result == 'success' }}
+    if: ${{ !cancelled() && needs.php-matrix.result == 'success' && needs.build-php.result != 'skipped' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.php-matrix.outputs.matrix) }}
@@ -439,6 +447,20 @@ jobs:
             docker buildx imagetools inspect "${DOCKER_REGISTRY}/${repo}:${{ matrix.tag }}"
           done
 
+      # One marker per promoted minor, so the release job only releases what this run published
+      - name: Record promotion (${{ matrix.minor }})
+        run: |
+          mkdir -p "${{ runner.temp }}/published"
+          echo "${{ matrix.patch }}" > "${{ runner.temp }}/published/${{ matrix.minor }}"
+
+      - name: Upload promotion marker
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: published-${{ matrix.minor }}
+          path: ${{ runner.temp }}/published/*
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Remove candidate tags
         if: always()
         continue-on-error: true
@@ -457,10 +479,11 @@ jobs:
   # ---- Release notes and notifications ---------------------------------------------------------
   # One GitHub release per published PHP release, tagged php-<release> (for example php-8.4.27),
   # with the manifest digest of each image. Idempotent: a release that already exists is left
-  # alone, and a minor whose images did not reach their exact tag in this run is skipped.
+  # alone, and a minor that publish-php did not promote in this run is skipped (it has no marker
+  # artifact), so a tag left on Docker Hub by an earlier run can never be released from this one.
   release:
     needs: [php-matrix, publish-php]
-    if: ${{ !cancelled() && needs.php-matrix.result == 'success' }}
+    if: ${{ !cancelled() && needs.php-matrix.result == 'success' && needs.publish-php.result != 'skipped' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -473,14 +496,27 @@ jobs:
         with:
           version: ${{ env.BUILDX_VERSION }}
 
+      - name: Download promotion markers
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/published
+          pattern: published-*
+          merge-multiple: true
+
       - name: Create GitHub releases for newly published PHP releases
         env:
           GH_TOKEN: ${{ github.token }}
           REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          PUBLISHED_DIR: ${{ runner.temp }}/published
         run: |
           echo '${{ needs.php-matrix.outputs.matrix }}' | jq -r '.include[] | "\(.minor) \(.patch) \(.tag) \(.prerelease)"' \
           | while read -r minor patch tag prerelease; do
             name="php-${patch}"
+            if [ "$(cat "${PUBLISHED_DIR}/${minor}" 2>/dev/null)" != "$patch" ]; then
+              echo "${name}: not promoted in this run, skipping"
+              continue
+            fi
             if gh release view "$name" >/dev/null 2>&1; then
               echo "${name}: release exists, skipping"
               continue
