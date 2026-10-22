@@ -125,7 +125,7 @@ test_php() {
     local net mp cid
     net="imgtest-$$-$RANDOM"
     docker network create "$net" >/dev/null
-    mp=$(docker run -d --rm --network "$net" --name "mailpit-$$" -p 127.0.0.1::8025 axllent/mailpit:latest)
+    mp=$(docker run -d --rm --network "$net" --name "mailpit-$$" -p 127.0.0.1::8025 ghcr.io/axllent/mailpit:latest)
     CONTAINERS+=("$mp")
     local mpport
     mpport=$(docker port "$mp" 8025/tcp | head -1 | sed 's/.*://')
