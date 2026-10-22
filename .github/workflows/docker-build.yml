@@ -105,25 +105,26 @@ jobs:
           context: ./alpine/base
           cache-from: type=gha,scope=base-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=base-${{ matrix.arch }}
-          tags: ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          # Two exporters: the registry copy by digest (listed last, so the digest the action reports
+          # is the pushed one) and a local copy that Trivy and test.sh use without pulling from Hub
+          outputs: |
+            type=docker,name=local/${{ env.BASE_IMAGE }}
+            type=image,name=${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }},push-by-digest=true,name-canonical=true,push=true
           provenance: true
           sbom: true
 
-      # Scan and test on this architecture before the digest can become part of a public tag
+      # Scan and test the local copy on this architecture before the digest can become part of a public tag
       - name: Run Trivy vulnerability scanner on Base Image (${{ matrix.arch }})
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}@${{ steps.build.outputs.digest }}
+          image-ref: local/${{ env.BASE_IMAGE }}
           format: 'table'
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           ignore-unfixed: true
-        env:
-          TRIVY_PLATFORM: ${{ matrix.platform }}
 
       - name: Smoke test Base Image (${{ matrix.arch }})
-        run: alpine/test.sh base ${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }}@${{ steps.build.outputs.digest }}
+        run: alpine/test.sh base local/${{ env.BASE_IMAGE }}
 
       - name: Export digest
         run: |
@@ -247,27 +248,26 @@ jobs:
           cache-from: type=gha,scope=php-${{ matrix.minor }}-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=php-${{ matrix.minor }}-${{ matrix.arch }}
           pull: true
-          tags: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}
           build-args: |
             PHP_VERSION=${{ env.PHP_VERSION }}
             PHP_PATCH_VERSION=${{ matrix.patch }}
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          outputs: |
+            type=docker,name=local/${{ env.PHP_IMAGE }}
+            type=image,name=${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }},push-by-digest=true,name-canonical=true,push=true
           provenance: true
           sbom: true
 
       - name: Run Trivy vulnerability scanner on PHP Image (${{ matrix.minor }}, ${{ matrix.arch }})
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}@${{ steps.php.outputs.digest }}
+          image-ref: local/${{ env.PHP_IMAGE }}
           format: 'table'
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           ignore-unfixed: true
-        env:
-          TRIVY_PLATFORM: ${{ matrix.platform }}
 
       - name: Smoke test PHP Image (${{ matrix.minor }}, ${{ matrix.arch }})
-        run: alpine/test.sh php ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}@${{ steps.php.outputs.digest }} ${{ matrix.patch }}
+        run: alpine/test.sh php local/${{ env.PHP_IMAGE }} ${{ matrix.patch }}
 
       # ---- PHP-NGINX image (FROM the php digest above) -------------------------
       - name: Build PHP-NGINX Image (${{ matrix.minor }}, ${{ matrix.arch }}) by digest
@@ -278,28 +278,27 @@ jobs:
           context: ./alpine/php-nginx
           cache-from: type=gha,scope=php-nginx-${{ matrix.minor }}-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=php-nginx-${{ matrix.minor }}-${{ matrix.arch }}
-          tags: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}
           build-args: |
             PHP_IMAGE=${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}@${{ steps.php.outputs.digest }}
             PHP_IMAGE_TAG=${{ matrix.tag }}
             PHP_VERSION=${{ env.PHP_VERSION }}
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          outputs: |
+            type=docker,name=local/${{ env.PHP_NGINX_IMAGE }}
+            type=image,name=${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }},push-by-digest=true,name-canonical=true,push=true
           provenance: true
           sbom: true
 
       - name: Run Trivy vulnerability scanner on PHP-NGINX Image (${{ matrix.minor }}, ${{ matrix.arch }})
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}@${{ steps.php-nginx.outputs.digest }}
+          image-ref: local/${{ env.PHP_NGINX_IMAGE }}
           format: 'table'
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           ignore-unfixed: true
-        env:
-          TRIVY_PLATFORM: ${{ matrix.platform }}
 
       - name: Smoke test PHP-NGINX Image (${{ matrix.minor }}, ${{ matrix.arch }})
-        run: alpine/test.sh php-nginx ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}@${{ steps.php-nginx.outputs.digest }} ${{ matrix.patch }}
+        run: alpine/test.sh php-nginx local/${{ env.PHP_NGINX_IMAGE }} ${{ matrix.patch }}
 
       # ---- PHP-NGINX-DEV image (FROM the php-nginx digest above) ---------------
       - name: Build PHP-NGINX-DEV Image (${{ matrix.minor }}, ${{ matrix.arch }}) by digest
@@ -310,28 +309,27 @@ jobs:
           context: ./alpine/php-nginx-dev
           cache-from: type=gha,scope=php-nginx-dev-${{ matrix.minor }}-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=php-nginx-dev-${{ matrix.minor }}-${{ matrix.arch }}
-          tags: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}
           build-args: |
             PHP_IMAGE=${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}@${{ steps.php-nginx.outputs.digest }}
             PHP_IMAGE_TAG=${{ matrix.tag }}
             PHP_VERSION=${{ env.PHP_VERSION }}
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          outputs: |
+            type=docker,name=local/${{ env.PHP_NGINX_DEV_IMAGE }}
+            type=image,name=${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }},push-by-digest=true,name-canonical=true,push=true
           provenance: true
           sbom: true
 
       - name: Run Trivy vulnerability scanner on PHP-NGINX-DEV Image (${{ matrix.minor }}, ${{ matrix.arch }})
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}@${{ steps.php-nginx-dev.outputs.digest }}
+          image-ref: local/${{ env.PHP_NGINX_DEV_IMAGE }}
           format: 'table'
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
           ignore-unfixed: true
-        env:
-          TRIVY_PLATFORM: ${{ matrix.platform }}
 
       - name: Smoke test PHP-NGINX-DEV Image (${{ matrix.minor }}, ${{ matrix.arch }})
-        run: alpine/test.sh php-nginx-dev ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_DEV_IMAGE }}@${{ steps.php-nginx-dev.outputs.digest }} ${{ matrix.patch }}
+        run: alpine/test.sh php-nginx-dev local/${{ env.PHP_NGINX_DEV_IMAGE }} ${{ matrix.patch }}
 
       # One file per image, named "<image> <digest>", so the publish job can join them
       - name: Export digests
