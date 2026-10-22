@@ -31,6 +31,18 @@ free_port() {
         || echo $((20000 + RANDOM % 20000))
 }
 
+# Wait up to ~5s for a line matching the pattern to appear in a container's logs. The log
+# driver can lag a moment behind the process that wrote the line, so an immediate
+# `docker logs | grep` right after a readiness check is racy.
+log_has() {
+    local cid=$1 pattern=$2
+    for _ in $(seq 1 25); do
+        docker logs "$cid" 2>&1 | grep -q -- "$pattern" && return 0
+        sleep 0.2
+    done
+    return 1
+}
+
 # Start a container, record it for cleanup, wait for /health and then for PHP-FPM to answer
 # (nginx comes up a moment before php-fpm, so /health alone is not proof that PHP is ready)
 start_web() {
@@ -143,7 +155,7 @@ test_php() {
     cid=$(docker run -d --rm -e CRON_SCHEDULE='*/1 * * * * * *' -e CRON_COMMAND='echo cli-cron-tick' "$img" cron)
     CONTAINERS+=("$cid")
     sleep 4
-    docker logs "$cid" 2>&1 | grep -q '^\[cron\] cli-cron-tick' && pass "cron command runs a scheduler container" || fail "cron command did not run jobs" "$(docker logs "$cid" 2>&1 | tail -5)"
+    log_has "$cid" '^\[cron\] cli-cron-tick' && pass "cron command runs a scheduler container" || fail "cron command did not run jobs" "$(docker logs "$cid" 2>&1 | tail -5)"
     docker rm -f "$cid" >/dev/null
     # worker mode restarts the command when it exits
     cid=$(docker run -d --rm -e CLI_COMMAND='echo worker-run; exit 1' -e CLI_RESTART_DELAY=1 "$img")
@@ -237,7 +249,7 @@ test_php_nginx() {
 
     # APP_INSTALL runs in the document root before the services start, and a failure stops the container
     cid=$(start_web "$port" -e APP_INSTALL='echo web prepared in $(pwd)' -v "$WORK/www:/var/www/html:ro" "$img") || fail "container with APP_INSTALL did not start"
-    docker logs "$cid" 2>&1 | grep -q '^\[install\] web prepared in /var/www/html$' && pass "APP_INSTALL runs in /var/www/html before the services" || fail "APP_INSTALL output missing" "$(docker logs "$cid" 2>&1 | head -5)"
+    log_has "$cid" '^\[install\] web prepared in /var/www/html' && pass "APP_INSTALL runs in /var/www/html before the services" || fail "APP_INSTALL output missing" "$(docker logs "$cid" 2>&1 | head -5)"
     docker logs "$cid" 2>&1 | awk '/^\[install\]/ {i=NR} /Starting php-fpm/ {s=NR} END {exit !(i && s && i < s)}' && pass "APP_INSTALL finished before php-fpm and nginx were started" || fail "services started before APP_INSTALL finished" "$(docker logs "$cid" 2>&1 | head -8)"
     docker rm -f "$cid" >/dev/null
     cid=$(docker run -d -e NGINX_PORT=8080 -e APP_INSTALL='exit 5' "$img"); CONTAINERS+=("$cid")
@@ -266,7 +278,7 @@ test_php_nginx() {
     cid=$(docker run -d --rm -p "127.0.0.1:${port}:8080" -e NGINX_PORT=8080 -e CRON_SCHEDULE='*/1 * * * * * *' -e CRON_COMMAND='echo cron-tick' "$img")
     CONTAINERS+=("$cid")
     sleep 4
-    docker logs "$cid" 2>&1 | grep -q '^\[cron\] cron-tick' && pass "cron job runs as non-root with tagged output" || fail "cron job did not run" "$(docker logs "$cid" 2>&1 | tail -5)"
+    log_has "$cid" '^\[cron\] cron-tick' && pass "cron job runs as non-root with tagged output" || fail "cron job did not run" "$(docker logs "$cid" 2>&1 | tail -5)"
     docker rm -f "$cid" >/dev/null
     cid=$(docker run -d --rm -e NGINX_PORT=8080 -e CRON_SCHEDULE='not a schedule' -e CRON_COMMAND='true' "$img")
     CONTAINERS+=("$cid")
