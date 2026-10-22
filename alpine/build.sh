@@ -4,10 +4,10 @@
 set -e
 
 # Define image names and tags
-BASE_IMAGE="adamrollogi/base:latest"
-PHP_IMAGE="adamrollogi/php"
-PHP_NGINX_IMAGE="adamrollogi/php-nginx"
-PHP_NGINX_DEV_IMAGE="adamrollogi/php-nginx-dev"
+BASE_IMAGE="rollogi/base:latest"
+PHP_IMAGE="rollogi/php"
+PHP_NGINX_IMAGE="rollogi/php-nginx"
+PHP_NGINX_DEV_IMAGE="rollogi/php-nginx-dev"
 PHP_VERSIONS_FILE="$(dirname "$0")/php-versions.txt"
 
 # Read "<minor> <release>" pairs from php-versions.txt, skipping comments and blank lines

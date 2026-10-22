@@ -1,6 +1,6 @@
 {
   "@context": "https://openvex.dev/ns/v0.2.0",
-  "@id": "https://github.com/adamrollogi/docker/vex",
+  "@id": "https://github.com/AdamRollinson/docker/vex",
   "author": "Rollogi",
   "timestamp": "2026-10-21T00:00:00Z",
   "statements": [
@@ -11,13 +11,13 @@
       },
       "products": [
         {
-          "@id": "pkg:docker/adamrollogi/base"
+          "@id": "pkg:docker/rollogi/base"
         },
         {
-          "@id": "pkg:docker/adamrollogi/php"
+          "@id": "pkg:docker/rollogi/php"
         },
         {
-          "@id": "pkg:docker/adamrollogi/php-nginx"
+          "@id": "pkg:docker/rollogi/php-nginx"
         }
       ],
       "status": "not_affected",

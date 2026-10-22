@@ -82,7 +82,7 @@ export default defineNuxtConfig({
     description: 'Multi-architecture PHP container images on Alpine Linux: base, php, php-nginx and php-nginx-dev.',
     full: {
       title: 'Rollogi Docker Images - Full Documentation',
-      description: 'Complete documentation for the adamrollogi/base, php, php-nginx and php-nginx-dev images.'
+      description: 'Complete documentation for the rollogi/base, php, php-nginx and php-nginx-dev images.'
     },
     sections: [
       { title: 'Getting Started', contentCollection: 'docs', contentFilters: [{ field: 'path', operator: 'LIKE', value: '/getting-started%' }] },

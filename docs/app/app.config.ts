@@ -26,7 +26,7 @@ export default defineAppConfig({
     colorMode: true,
     links: [{
       'icon': 'i-simple-icons-docker',
-      'to': 'https://hub.docker.com/u/adamrollogi',
+      'to': 'https://hub.docker.com/u/rollogi',
       'target': '_blank',
       'aria-label': 'Docker Hub'
     }, {
@@ -41,7 +41,7 @@ export default defineAppConfig({
     colorMode: false,
     links: [{
       'icon': 'i-simple-icons-docker',
-      'to': 'https://hub.docker.com/u/adamrollogi',
+      'to': 'https://hub.docker.com/u/rollogi',
       'target': '_blank',
       'aria-label': 'Docker Hub'
     }, {
@@ -59,7 +59,7 @@ export default defineAppConfig({
       links: [{
         icon: 'i-simple-icons-docker',
         label: 'Images on Docker Hub',
-        to: 'https://hub.docker.com/u/adamrollogi',
+        to: 'https://hub.docker.com/u/rollogi',
         target: '_blank'
       }, {
         icon: 'i-lucide-bug',

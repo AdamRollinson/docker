@@ -4,12 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Docker image build system that produces multi-architecture (amd64/arm64) PHP container images published to Docker Hub under `adamrollogi/`. Three layered images are built:
+Docker image build system that produces multi-architecture (amd64/arm64) PHP container images published to Docker Hub under the `rollogi/` organisation (`adamrollogi/` until 22 October 2026; those repositories no longer receive updates). Three layered images are built:
 
-1. **`adamrollogi/base:latest`** — Alpine 3.24 base with tini, supercronic and common tools
-2. **`adamrollogi/php:{version}`** — PHP CLI with Composer and extensions (builds on base)
-3. **`adamrollogi/php-nginx:{version}`** — PHP-FPM + Nginx web stack (builds on php)
-4. **`adamrollogi/php-nginx-dev:{version}`** — php-nginx plus Xdebug and development defaults (builds on php-nginx)
+1. **`rollogi/base:latest`** — Alpine 3.24 base with tini, supercronic and common tools
+2. **`rollogi/php:{version}`** — PHP CLI with Composer and extensions (builds on base)
+3. **`rollogi/php-nginx:{version}`** — PHP-FPM + Nginx web stack (builds on php)
+4. **`rollogi/php-nginx-dev:{version}`** — php-nginx plus Xdebug and development defaults (builds on php-nginx)
 
 Supported PHP versions: **8.2, 8.3, 8.4, 8.5**, plus **8.6** as a pre-release from Alpine edge/testing on the `8.6-rc` channel tag (no bare `8.6` tag until 8.6.0 is pinned)
 
@@ -22,18 +22,18 @@ The exact release for each minor version is pinned in `alpine/php-versions.txt` 
 # From the alpine/ directory:
 cd alpine && ./build.sh
 ```
-This builds all images sequentially: base → php (×5 versions) → php-nginx (×5 versions) → php-nginx-dev (×5 versions). Images are tagged locally with both the minor and the pinned release (e.g., `adamrollogi/php:8.3` and `adamrollogi/php:8.3.35`).
+This builds all images sequentially: base → php (×5 versions) → php-nginx (×5 versions) → php-nginx-dev (×5 versions). Images are tagged locally with both the minor and the pinned release (e.g., `rollogi/php:8.3` and `rollogi/php:8.3.35`).
 
 ### Build a single image manually
 ```bash
 # Base
-docker build -t adamrollogi/base:latest ./alpine/base
+docker build -t rollogi/base:latest ./alpine/base
 
 # PHP (version without dots as build arg, e.g., 83 for 8.3; PHP_PATCH_VERSION pins the release)
-docker build --build-arg PHP_VERSION=83 --build-arg PHP_PATCH_VERSION=8.3.35 -t adamrollogi/php:8.3 ./alpine/php
+docker build --build-arg PHP_VERSION=83 --build-arg PHP_PATCH_VERSION=8.3.35 -t rollogi/php:8.3 ./alpine/php
 
 # PHP-Nginx (needs both args)
-docker build --build-arg PHP_IMAGE_TAG=8.3 --build-arg PHP_VERSION=83 -t adamrollogi/php-nginx:8.3 ./alpine/php-nginx
+docker build --build-arg PHP_IMAGE_TAG=8.3 --build-arg PHP_VERSION=83 -t rollogi/php-nginx:8.3 ./alpine/php-nginx
 ```
 
 ## Architecture
@@ -112,7 +112,7 @@ There is no supervisord (and therefore no Python) in the images since October 20
 
 ### Image build (`.github/workflows/docker-build.yml`)
 - **Triggers**: push to `main` (ignoring `docs/**`, Markdown, `LICENSE`, `docs-ci.yml` and `dependabot.yml`, so documentation changes never rebuild images), manual `workflow_dispatch`, weekly cron (so Alpine fixes ship without a code change)
-- **Scan and test before publish**: each single-platform image is first built with `load: true` and no attestations as `local/<image>` (a classic Docker daemon cannot load the manifest list that provenance and SBOM attestations produce, so one build with two exporters fails with `docker exporter does not currently support exporting manifest lists`), Trivy scans and `alpine/test.sh` tests that local copy on the architecture that built it, and only then is the same build repeated from the cache with attestations and pushed by digest only (`push-by-digest`), so nothing reaches Docker Hub before it passes and nothing is pulled back from Hub (a Personal Hub account has 200 pulls per six hours and the run on 22 October 2026 exhausted them in the sign step; `test.sh` pulls Mailpit from `ghcr.io` for the same reason) (health endpoint, PHP version, extensions, package consistency, no setuid files, tagged logs, read-only recipe, root and arbitrary-user modes, redirect host, metrics, cron, mail, worker, APP_INSTALL, Xdebug toggle). The publish job joins the two digests into a manifest list as `:candidate-<sha>[-<minor>]`, VEX-attests it and promotes it to its real tags with `docker buildx imagetools create`. After promotion the manifest list is signed keylessly with cosign (`sigstore/cosign-installer`, workflow has `id-token: write`); verify with `cosign verify --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-identity-regexp '^https://github.com/AdamRollinson/docker/\.github/workflows/docker-build\.yml@refs/heads/main$' <image>`. Candidate tags are deleted via the Docker Hub API afterwards (best effort)
+- **Scan and test before publish**: each single-platform image is first built with `load: true` and no attestations as `local/<image>` (a classic Docker daemon cannot load the manifest list that provenance and SBOM attestations produce, so one build with two exporters fails with `docker exporter does not currently support exporting manifest lists`), Trivy scans and `alpine/test.sh` tests that local copy on the architecture that built it, and only then is the same build repeated from the cache with attestations and pushed by digest only (`push-by-digest`), so nothing reaches Docker Hub before it passes and nothing is pulled back from Hub (the run on 22 October 2026 exhausted a Personal account's 200 pulls per six hours in the sign step; images have published under the `rollogi` organisation on a Docker Team plan, which has no pull limit, since that day, while `DOCKER_USER` remains the member account that logs in) (a Personal Hub account has 200 pulls per six hours and the run on 22 October 2026 exhausted them in the sign step; `test.sh` pulls Mailpit from `ghcr.io` for the same reason) (health endpoint, PHP version, extensions, package consistency, no setuid files, tagged logs, read-only recipe, root and arbitrary-user modes, redirect host, metrics, cron, mail, worker, APP_INSTALL, Xdebug toggle). The publish job joins the two digests into a manifest list as `:candidate-<sha>[-<minor>]`, VEX-attests it and promotes it to its real tags with `docker buildx imagetools create`. After promotion the manifest list is signed keylessly with cosign (`sigstore/cosign-installer`, workflow has `id-token: write`); verify with `cosign verify --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-identity-regexp '^https://github.com/AdamRollinson/docker/\.github/workflows/docker-build\.yml@refs/heads/main$' <image>`. Candidate tags are deleted via the Docker Hub API afterwards (best effort)
 - `DOCKER_PAT` is only exposed to the login and candidate-cleanup steps, never at workflow scope
 - Buildx is pinned to a mainline release via `BUILDX_VERSION`. Dependabot covers both GitHub Actions and the `alpine/base` Docker digest
 - **Build strategy**: `php-matrix` turns `alpine/php-versions.txt` into two matrices (`matrix`: one entry per minor with `minor`/`patch`/`tag`/`prerelease`; `build_matrix`: the same crossed with `arch`/`platform`/`runner`). `build-base` (per arch) → `publish-base` → `build-php` (per minor × arch, chains php → php-nginx → php-nginx-dev on one runner, each `FROM` the digest just pushed via the `PHP_IMAGE` build arg) → `publish-php` (per minor, `if: !cancelled()` so one failing minor does not block the others, but skipped outright when `build-php` was skipped). Digests travel between jobs as artifacts named `digests-<image>-<minor>-<arch>`, one empty file per image named `"<image> <digest>"`
@@ -122,7 +122,7 @@ There is no supervisord (and therefore no Python) in the images since October 20
 - VEX attestations via `docker/scout-action` (attestation-add command)
 - Trivy vulnerability scanning (fails on CRITICAL/HIGH)
 - **Releases and notifications**: the `release` job (`contents: write`, `if: !cancelled()`) runs after `publish-php` (skipped when that job was skipped) and, for every matrix entry that `publish-php` promoted in this run (it uploads a `published-<minor>` marker artifact after the verify step) and that has no `php-<patch>` GitHub release yet, creates one with `gh release create --target $GITHUB_SHA --latest=false` (plus `--prerelease` for `_` pins) using notes from `alpine/release-notes.sh` (image digests via `imagetools inspect`, cosign verify snippet; exits 3 when the tag is not on Hub). The `notify` job (`if: always()`) and the bump workflow call `alpine/notify.sh <status> <title> <message> [url]`, which POSTs JSON (`text` and `content` plus structured fields) to `NOTIFY_WEBHOOK_URL` and is a no-op when the secret is unset
-- **Required secrets/vars**: `DOCKER_USER` (variable), `DOCKER_PAT` (secret, needs read/write/delete scope so candidate tags can be removed), `NOTIFY_WEBHOOK_URL` (optional secret)
+- **Required secrets/vars**: `DOCKER_USER` (variable: the Hub account that logs in, a member of the `rollogi` organisation; the namespace itself is `DOCKER_REGISTRY` in the workflow env), `DOCKER_PAT` (secret for that account, needs read/write/delete scope so candidate tags can be removed), `NOTIFY_WEBHOOK_URL` (optional secret)
 
 ### Runtime user
 `appuser` is created in the base Dockerfile from the `APP_UID`/`APP_GID` build args (default 1000) and exported as env vars of the same name; `build.sh` forwards `APP_UID`/`APP_GID` from the environment. Derived images chown by name, so a custom UID propagates without changes. Never reintroduce setuid helpers (gosu, su-exec) for identity switching.

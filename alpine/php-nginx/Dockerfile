@@ -1,8 +1,8 @@
 ARG PHP_IMAGE_TAG=8.3
 # Full reference of the php image to build on. Defaults to the tag above; CI passes the
-# per-architecture digest it just built (adamrollogi/php@sha256:...) so each native runner
+# per-architecture digest it just built (rollogi/php@sha256:...) so each native runner
 # chains php -> php-nginx -> php-nginx-dev without waiting for the manifest list.
-ARG PHP_IMAGE=adamrollogi/php:${PHP_IMAGE_TAG}
+ARG PHP_IMAGE=rollogi/php:${PHP_IMAGE_TAG}
 
 FROM ${PHP_IMAGE}
 
@@ -81,10 +81,10 @@ RUN set -eux; \
     find / -xdev -type f -perm /6000 -exec chmod a-s {} +
 
 # OCI metadata labels
-LABEL org.opencontainers.image.title="adamrollogi/php-nginx" \
+LABEL org.opencontainers.image.title="rollogi/php-nginx" \
       org.opencontainers.image.description="PHP-FPM + Nginx web stack on Alpine 3.24" \
       org.opencontainers.image.version="${PHP_PATCH_VERSION}" \
-      org.opencontainers.image.source="https://github.com/adamrollogi/docker" \
+      org.opencontainers.image.source="https://github.com/AdamRollinson/docker" \
       org.opencontainers.image.licenses="MIT"
 
 # Copy configuration templates (root-owned; rendered into /run at startup) and entrypoint files

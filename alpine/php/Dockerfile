@@ -1,5 +1,5 @@
 # Use the updated base image
-FROM adamrollogi/base:latest
+FROM rollogi/base:latest
 
 # Switch to root for package installation
 USER root
@@ -194,10 +194,10 @@ RUN curl -sS https://getcomposer.org/installer -o composer-setup.php && \
     rm composer-setup.php
 
 # OCI metadata labels
-LABEL org.opencontainers.image.title="adamrollogi/php" \
+LABEL org.opencontainers.image.title="rollogi/php" \
       org.opencontainers.image.description="PHP CLI with Composer and extensions on Alpine 3.24" \
       org.opencontainers.image.version="${PHP_PATCH_VERSION}" \
-      org.opencontainers.image.source="https://github.com/adamrollogi/docker" \
+      org.opencontainers.image.source="https://github.com/AdamRollinson/docker" \
       org.opencontainers.image.licenses="MIT" \
       io.rollogi.php.extra-extensions="${PHP_EXTRA_EXTENSIONS}"
 

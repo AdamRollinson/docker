@@ -7,13 +7,13 @@
 #   alpine/test.sh php           IMAGE EXPECTED_PHP_VERSION
 #   alpine/test.sh php-nginx     IMAGE EXPECTED_PHP_VERSION
 #   alpine/test.sh php-nginx-dev IMAGE EXPECTED_PHP_VERSION
-#   alpine/test.sh all           MINOR            # local images adamrollogi/*:MINOR (or *:MINOR-rc for a pre-release), version from php-versions.txt
+#   alpine/test.sh all           MINOR            # local images rollogi/*:MINOR (or *:MINOR-rc for a pre-release), version from php-versions.txt
 #
 # Exits non-zero on the first failing check. Needs docker and curl.
 
 set -euo pipefail
 
-PREFIX="${IMAGE_PREFIX:-adamrollogi}"
+PREFIX="${IMAGE_PREFIX:-rollogi}"
 WORK=$(mktemp -d)
 CONTAINERS=()
 cleanup() {
