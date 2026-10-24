@@ -4,12 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Docker image build system that produces multi-architecture (amd64/arm64) PHP container images published to Docker Hub under the `rollogi/` organisation (`adamrollogi/` until 22 October 2026; those repositories no longer receive updates). Three layered images are built:
+Docker image build system that produces multi-architecture (amd64/arm64) PHP container images published to Docker Hub under the `rollogi/` organisation (`adamrollogi/` until 22 October 2026; those repositories no longer receive updates). These layered images are built:
 
 1. **`rollogi/base:latest`** — Alpine 3.24 base with tini, supercronic and common tools
 2. **`rollogi/php:{version}`** — PHP CLI with Composer and extensions (builds on base)
 3. **`rollogi/php-nginx:{version}`** — PHP-FPM + Nginx web stack (builds on php)
 4. **`rollogi/php-nginx-dev:{version}`** — php-nginx plus Xdebug and development defaults (builds on php-nginx)
+5. **`rollogi/php-fpm:{version}`** - PHP-FPM only, listening on `0.0.0.0:9000`, for a web server in another container (builds on php)
 
 Supported PHP versions: **8.2, 8.3, 8.4, 8.5**, plus **8.6** as a pre-release from Alpine edge/testing on the `8.6-rc` channel tag (no bare `8.6` tag until 8.6.0 is pinned)
 
@@ -22,7 +23,7 @@ The exact release for each minor version is pinned in `alpine/php-versions.txt` 
 # From the alpine/ directory:
 cd alpine && ./build.sh
 ```
-This builds all images sequentially: base → php (×5 versions) → php-nginx (×5 versions) → php-nginx-dev (×5 versions). Images are tagged locally with both the minor and the pinned release (e.g., `rollogi/php:8.3` and `rollogi/php:8.3.35`).
+This builds all images sequentially: base → php (×5 versions) → php-nginx (×5 versions) → php-nginx-dev (×5 versions) → php-fpm (×5 versions). Images are tagged locally with both the minor and the pinned release (e.g., `rollogi/php:8.3` and `rollogi/php:8.3.35`).
 
 ### Build a single image manually
 ```bash
@@ -43,8 +44,9 @@ docker build --build-arg PHP_IMAGE_TAG=8.3 --build-arg PHP_VERSION=83 -t rollogi
 Alpine 3.24
   └── base (tini, supercronic, bash, curl, git, envsubst)
         └── php:{version} (PHP CLI, Composer, extensions, php.ini.template)
-              └── php-nginx:{version} (Nginx, PHP-FPM, config templates)
-                    └── php-nginx-dev:{version} (Xdebug, no-cache snippet, dev php defaults)
+              ├── php-nginx:{version} (Nginx, PHP-FPM, config templates)
+              │     └── php-nginx-dev:{version} (Xdebug, no-cache snippet, dev php defaults)
+              └── php-fpm:{version} (PHP-FPM only, FastCGI healthcheck)
 ```
 
 ### Configuration via Environment Variables
@@ -72,6 +74,9 @@ Every real PHP package carries the pin: the core, every extension subpackage, `o
 Runtime state directories (`/run/php`, `/run/nginx`, `/run/cron`, `/run/php/conf.d`, `/etc/nginx/ssl`, `/var/log`, `/var/lib/nginx`) are owned by appuser and chmod `1777` (sticky, world-writable, like `/tmp`) so the images run under an arbitrary `--user uid:gid`; `test.sh` exercises both images as `4321:4321`. Nothing under `/etc` or `/usr` is writable by non-root.
 
 `PHP_EXTRA_EXTENSIONS` (build arg, default empty, forwarded by `build.sh` from the environment) installs additional extensions: each name is tried as `php8x-<name>~<release>` then as `php8x-pecl-<name>`, and the build fails if neither exists; the set is recorded in the `io.rollogi.php.extra-extensions` label. CI builds the default (empty) set only.
+
+### FPM-only image (php-fpm)
+`php-fpm` is php plus the pinned `php8x-fpm` package and `fcgi` (for `cgi-fcgi`), with no web server. The pool template `www.conf.template` lives in the php image at `/usr/local/etc/php/` and both php-nginx and php-fpm render it through `render_fpm_config` in `entrypoint-lib.sh` (pool, non-root user/group stripping, `PHP_FPM_LISTEN_ALLOWED_CLIENTS` as `listen.allowed_clients` with `127.0.0.1` always added, master `php-fpm.conf`, `fpm.global.*` and `fpm.pool.*` overrides), so the two images cannot drift. php-fpm defaults `PHP_FPM_LISTEN=0.0.0.0:9000` and `APP_INSTALL_DIR=/var/www/html`, `serve` starts php-fpm plus supercronic when cron is configured, and `HEALTHCHECK` runs `php-fpm-healthcheck`, which sends `/fpm-ping` over FastCGI with `env -i cgi-fcgi` to the port (or socket) from `PHP_FPM_LISTEN`. `test.sh php-fpm` drives it from a second container on a private Docker network, the way a sidecar would.
 
 ### Development image (php-nginx-dev)
 `php-nginx-dev-entrypoint.sh` renders `/run/php/conf.d/50-xdebug.ini` (loaded through `PHP_INI_SCAN_DIR=:/run/php/conf.d`, which keeps the stock scan dir) when `PHP_DEBUGGER=xdebug`, renders the `NGINX_NO_CACHE_PATTERN` location into `/run/nginx/after.d/no-cache.conf`, then execs the php-nginx entrypoint. The Alpine `php8x-pecl-xdebug` package's own ini is deleted at build time so loading is runtime-controlled. Xdebug is installed from edge like PHP itself, unpinned.
@@ -115,7 +120,7 @@ There is no supervisord (and therefore no Python) in the images since October 20
 - **Scan and test before publish**: each single-platform image is first built with `load: true` and no attestations as `local/<image>` (a classic Docker daemon cannot load the manifest list that provenance and SBOM attestations produce, so one build with two exporters fails with `docker exporter does not currently support exporting manifest lists`), Trivy scans and `alpine/test.sh` tests that local copy on the architecture that built it, and only then is the same build repeated from the cache with attestations and pushed by digest only (`push-by-digest`), so nothing reaches Docker Hub before it passes and nothing is pulled back from Hub (the run on 22 October 2026 exhausted a Personal account's 200 pulls per six hours in the sign step; images have published under the `rollogi` organisation on a Docker Team plan, which has no pull limit, since that day, while `DOCKER_USER` remains the member account that logs in) (a Personal Hub account has 200 pulls per six hours and the run on 22 October 2026 exhausted them in the sign step; `test.sh` pulls Mailpit from `ghcr.io` for the same reason) (health endpoint, PHP version, extensions, package consistency, no setuid files, tagged logs, read-only recipe, root and arbitrary-user modes, redirect host, metrics, cron, mail, worker, APP_INSTALL, Xdebug toggle). The publish job joins the two digests into a manifest list as `:candidate-<sha>[-<minor>]`, VEX-attests it and promotes it to its real tags with `docker buildx imagetools create`. After promotion the manifest list is signed keylessly with cosign (`sigstore/cosign-installer`, workflow has `id-token: write`); verify with `cosign verify --certificate-oidc-issuer https://token.actions.githubusercontent.com --certificate-identity-regexp '^https://github.com/AdamRollinson/docker/\.github/workflows/docker-build\.yml@refs/heads/main$' <image>`. Candidate tags are deleted via the Docker Hub API afterwards (best effort)
 - `DOCKER_PAT` is only exposed to the login and candidate-cleanup steps, never at workflow scope
 - Buildx is pinned to a mainline release via `BUILDX_VERSION`. Dependabot covers both GitHub Actions and the `alpine/base` Docker digest
-- **Build strategy**: `php-matrix` turns `alpine/php-versions.txt` into two matrices (`matrix`: one entry per minor with `minor`/`patch`/`tag`/`prerelease`; `build_matrix`: the same crossed with `arch`/`platform`/`runner`). `build-base` (per arch) → `publish-base` → `build-php` (per minor × arch, chains php → php-nginx → php-nginx-dev on one runner, each `FROM` the digest just pushed via the `PHP_IMAGE` build arg) → `publish-php` (per minor, `if: !cancelled()` so one failing minor does not block the others, but skipped outright when `build-php` was skipped). Digests travel between jobs as artifacts named `digests-<image>-<minor>-<arch>`, one empty file per image named `"<image> <digest>"`
+- **Build strategy**: `php-matrix` turns `alpine/php-versions.txt` into two matrices (`matrix`: one entry per minor with `minor`/`patch`/`tag`/`prerelease`; `build_matrix`: the same crossed with `arch`/`platform`/`runner`). `build-base` (per arch) → `publish-base` → `build-php` (per minor × arch, chains php → php-nginx → php-nginx-dev and php → php-fpm on one runner, each `FROM` the digest just pushed via the `PHP_IMAGE` build arg) → `publish-php` (per minor, `if: !cancelled()` so one failing minor does not block the others, but skipped outright when `build-php` was skipped); its first step writes the space-separated `IMAGES` list to `GITHUB_ENV` and every candidate, promote, sign, verify and cleanup loop iterates over it. Digests travel between jobs as artifacts named `digests-<image>-<minor>-<arch>`, one empty file per image named `"<image> <digest>"`
 - Each image is promoted with two tags: `:{tag}` (minor or channel) and `:{patch}`
 - **Native multi-arch**: amd64 on `ubuntu-24.04`, arm64 on `ubuntu-24.04-arm` (free for public repos), plain **buildx** with the `docker-container` driver, no QEMU. Layer cache lives in the GitHub Actions cache (`type=gha`, one scope per image and arch). Docker Build Cloud was dropped in October 2026 after its builder started refusing builds (`concurrent build limit of 0`); QEMU emulation was dropped for native runners in the same month
 - Publishes to Docker Hub with SBOM and provenance attestation
@@ -148,14 +153,17 @@ A Nuxt 4 site built from the Nuxt UI docs template with `@nuxt/ui`, `@nuxt/conte
 | `alpine/php-nginx/app.conf.template` | Nginx HTTP-only server config template |
 | `alpine/php-nginx/app-ssl.conf.template` | Nginx HTTPS server config template |
 | `alpine/php-nginx/app-ssl-redirect.conf.template` | HTTP→HTTPS redirect template |
-| `alpine/php-nginx/www.conf.template` | PHP-FPM pool configuration template |
+| `alpine/php/www.conf.template` | PHP-FPM pool configuration template (shipped by php, rendered by php-nginx and php-fpm) |
 | `alpine/php-nginx/php-nginx-entrypoint.sh` | Nginx container entrypoint (SSL logic, envsubst) |
 | `alpine/php-nginx/healthcheck.sh` | Docker HEALTHCHECK wrapper (HTTP/HTTPS aware) |
-| `alpine/base/entrypoint-lib.sh` | Shared entrypoint helpers (`log`, `json_escape`, `apply_ini_overrides`) |
+| `alpine/base/entrypoint-lib.sh` | Shared entrypoint helpers (`log`, `json_escape`, `apply_ini_overrides`, `render_crontab`, `render_msmtp`, `run_app_install`, `render_fpm_config`) |
 | `alpine/base/run-service` | Service wrapper that tags or JSON-wraps log lines per service |
 | `alpine/base/container-logs` | Tails per-service log files in `LOG_MODE=file` |
 | `alpine/php-nginx-dev/Dockerfile` | Xdebug development image |
 | `alpine/php-nginx-dev/php-nginx-dev-entrypoint.sh` | Renders Xdebug ini and no-cache snippet, then chains to php-nginx entrypoint |
+| `alpine/php-fpm/Dockerfile` | PHP-FPM only image |
+| `alpine/php-fpm/php-fpm-entrypoint.sh` | Renders php.ini and the pool, runs php-fpm (and cron) |
+| `alpine/php-fpm/php-fpm-healthcheck` | FastCGI ping healthcheck |
 | `ENV.md` | Complete environment variable reference |
 | `docs/` | Nuxt documentation site deployed to Cloudflare Workers as static assets |
 | `SECURITY.md` | CVE details and VEX attestation documentation |

@@ -113,3 +113,29 @@ run_app_install() {
         exit "$status"
     fi
 }
+
+# PHP-FPM master config and [www] pool, rendered into /run/php from the pool template the php
+# image ships (/usr/local/etc/php/www.conf.template), then fpm.global.* and fpm.pool.* overrides.
+# Shared by php-nginx and php-fpm. PHP_FPM_LISTEN_ALLOWED_CLIENTS restricts which addresses may
+# connect to a TCP listener; 127.0.0.1 is always added so the local healthcheck keeps working.
+render_fpm_config() {
+    local run=/run/php pool=/run/php/php-fpm.d/www.conf clients
+    mkdir -p "${run}/php-fpm.d"
+    envsubst < /usr/local/etc/php/www.conf.template > "$pool"
+
+    # A non-root master cannot switch to the pool user, so drop the directives
+    if [ "$(id -u)" != "0" ]; then
+        sed -i '/^user = /d; /^group = /d' "$pool"
+    fi
+
+    clients="${PHP_FPM_LISTEN_ALLOWED_CLIENTS:-}"
+    if [ -n "$clients" ]; then
+        case ",${clients}," in *,127.0.0.1,*) ;; *) clients="127.0.0.1,${clients}" ;; esac
+        printf '\nlisten.allowed_clients = %s\n' "$clients" >> "$pool"
+    fi
+
+    printf '[global]\nerror_log = %s\n' "${PHP_FPM_ERROR_LOG}" > "${run}/php-fpm.conf"
+    apply_ini_overrides fpm.global "${run}/php-fpm.conf"
+    printf '\ninclude=%s/php-fpm.d/*.conf\n' "${run}" >> "${run}/php-fpm.conf"
+    apply_ini_overrides fpm.pool "$pool"
+}

@@ -12,6 +12,7 @@ Full documentation: https://docker.rollogi.co.uk (source in `docs/`). This READM
 | `rollogi/php:{version}` | PHP CLI with Composer and common extensions |
 | `rollogi/php-nginx:{version}` | PHP-FPM + Nginx web stack with optional HTTPS |
 | `rollogi/php-nginx-dev:{version}` | php-nginx plus Xdebug, visible errors and uncached assets, for local development |
+| `rollogi/php-fpm:{version}` | PHP-FPM only on port 9000, for nginx or Caddy in another container or a Kubernetes sidecar |
 
 **Supported PHP versions:** 8.2, 8.3, 8.4, 8.5, and 8.6 as a pre-release
 
@@ -25,8 +26,9 @@ Pre-releases live on a channel tag. PHP 8.6 is built from Alpine's testing repos
 Alpine 3.24
   └── base (tini, supercronic, bash, curl, git, envsubst)
         └── php:{version} (PHP CLI, Composer, extensions)
-              └── php-nginx:{version} (Nginx, PHP-FPM, SSL support)
-                    └── php-nginx-dev:{version} (Xdebug, dev defaults)
+              ├── php-nginx:{version} (Nginx, PHP-FPM, SSL support)
+              │     └── php-nginx-dev:{version} (Xdebug, dev defaults)
+              └── php-fpm:{version} (PHP-FPM only, FastCGI healthcheck)
 ```
 
 ## Quick start
@@ -45,6 +47,15 @@ docker run --rm -d -p 8080:8080 \
   -v $(pwd):/var/www/html \
   rollogi/php-nginx:8.4
 ```
+
+### PHP-FPM for a separate web server
+
+```bash
+docker run --rm -d --name php --network app -v $(pwd):/var/www/html:ro rollogi/php-fpm:8.4
+# then point nginx or Caddy in another container at php:9000 with the same /var/www/html mount
+```
+
+`php-fpm` listens on `0.0.0.0:9000`, answers a FastCGI healthcheck on its ping path, and takes every `PHP_*`, `php.*` and `fpm.pool.*` setting the web image does. `PHP_FPM_LISTEN_ALLOWED_CLIENTS` restricts which addresses may connect. Keep port 9000 on a private network.
 
 ### PHP-FPM + Nginx (HTTPS with self-signed cert)
 

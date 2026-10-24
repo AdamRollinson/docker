@@ -89,7 +89,6 @@ LABEL org.opencontainers.image.title="rollogi/php-nginx" \
 
 # Copy configuration templates (root-owned; rendered into /run at startup) and entrypoint files
 COPY app.conf.template app-ssl.conf.template app-ssl-redirect.conf.template metrics.conf.template /usr/local/etc/nginx/
-COPY www.conf.template /usr/local/etc/php/www.conf.template
 COPY index.php /var/www/html/index.php
 COPY php-nginx-entrypoint.sh /usr/local/bin/
 COPY healthcheck.sh /usr/local/bin/

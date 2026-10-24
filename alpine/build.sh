@@ -8,6 +8,7 @@ BASE_IMAGE="rollogi/base:latest"
 PHP_IMAGE="rollogi/php"
 PHP_NGINX_IMAGE="rollogi/php-nginx"
 PHP_NGINX_DEV_IMAGE="rollogi/php-nginx-dev"
+PHP_FPM_IMAGE="rollogi/php-fpm"
 PHP_VERSIONS_FILE="$(dirname "$0")/php-versions.txt"
 
 # Read "<minor> <release>" pairs from php-versions.txt, skipping comments and blank lines
@@ -81,6 +82,22 @@ while read -r version patch; do
         -t "$IMAGE_TAG" \
         -t "$PATCH_TAG" \
         ./php-nginx-dev
+done < <(read_php_versions)
+
+# Build PHP-FPM images (on the php image, without a web server)
+while read -r version patch; do
+    PHP_VERSION_ENV=$(echo "$version" | tr -d '.')
+    CHANNEL=$(channel_tag "$version" "$patch")
+    IMAGE_TAG="$PHP_FPM_IMAGE:$CHANNEL"
+    PATCH_TAG="$PHP_FPM_IMAGE:$patch"
+
+    echo "⚙️  Building PHP-FPM image: $IMAGE_TAG ($PATCH_TAG) with PHP_IMAGE_TAG=$CHANNEL and PHP_VERSION=$PHP_VERSION_ENV"
+    docker build \
+        --build-arg PHP_IMAGE_TAG="$CHANNEL" \
+        --build-arg PHP_VERSION="$PHP_VERSION_ENV" \
+        -t "$IMAGE_TAG" \
+        -t "$PATCH_TAG" \
+        ./php-fpm
 done < <(read_php_versions)
 
 echo "✅ All images built successfully!"

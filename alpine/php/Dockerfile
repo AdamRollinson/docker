@@ -214,8 +214,9 @@ COPY php-entrypoint.sh /usr/local/bin/
 # Make the entrypoint script executable
 RUN chmod +x /usr/local/bin/php-entrypoint.sh
 
-# Copy the custom PHP ini and msmtp templates
-COPY php.ini.template msmtprc.template /usr/local/etc/php/
+# Copy the PHP ini, msmtp and PHP-FPM pool templates (the pool template is used by php-nginx
+# and php-fpm through render_fpm_config in entrypoint-lib.sh)
+COPY php.ini.template msmtprc.template www.conf.template /usr/local/etc/php/
 
 # Runtime-rendered config goes to /run/php; /etc/php* stays root-owned. Runtime state
 # directories are sticky and world-writable so any --user can render its config and write logs.
