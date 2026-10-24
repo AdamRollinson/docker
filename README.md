@@ -348,15 +348,17 @@ See [ENV.md](ENV.md) for the complete variable reference including OPcache, secu
 
 ### PHP extensions (included)
 
-bcmath, ctype, curl, dom, exif, fileinfo, gd, iconv, intl, json, mbstring, mysqli, opcache, pcntl, pdo, pdo_mysql, phar, posix, redis, session, simplexml, soap, tokenizer, xml, xmlreader, xmlwriter, zip, imagick
+apcu, bcmath, ctype, curl, dom, exif, fileinfo, gd, iconv, igbinary, intl, json, mbstring, msgpack, mysqli, opcache, pcntl, pdo, pdo_mysql, pdo_pgsql, pdo_sqlite, pgsql, phar, posix, redis, session, simplexml, soap, sockets, sodium, sqlite3, tokenizer, xml, xmlreader, xmlwriter, zip, imagick
+
+MySQL, PostgreSQL and SQLite drivers, Redis and APCu are all in the default image, so a typical Laravel or Symfony application needs nothing extra. APCu is off for the CLI unless you set `php.apc.enable_cli=1`.
 
 Need more? Build your own variant with `PHP_EXTRA_EXTENSIONS`; core extensions are pinned to the PHP release and PECL ones resolve automatically:
 
 ```bash
 docker build --build-arg PHP_VERSION=84 --build-arg PHP_PATCH_VERSION=8.4.27 \
-  --build-arg PHP_EXTRA_EXTENSIONS="pgsql pdo_pgsql ldap memcached apcu amqp yaml" \
+  --build-arg PHP_EXTRA_EXTENSIONS="ldap gmp memcached mongodb amqp yaml" \
   -t myorg/php:8.4 ./alpine/php
-PHP_EXTRA_EXTENSIONS="pgsql pdo_pgsql" ./alpine/build.sh    # whole set
+PHP_EXTRA_EXTENSIONS="ldap memcached" ./alpine/build.sh    # whole set
 ```
 
 An unavailable extension fails the build with the package names it tried, and the chosen set is recorded in the `io.rollogi.php.extra-extensions` label.

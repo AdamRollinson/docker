@@ -9,7 +9,7 @@ USER root
 #   PHP_PATCH_VERSION - exact release to pin (e.g. 8.3.35); empty installs whatever edge has
 ARG PHP_VERSION
 ARG PHP_PATCH_VERSION
-# Space-separated extra extensions for a custom build, e.g. "pgsql pdo_pgsql ldap memcached apcu".
+# Space-separated extra extensions for a custom build, e.g. "ldap gmp memcached mongodb amqp".
 # Core extensions are installed pinned to the PHP release; PECL ones (memcached, apcu, amqp,
 # yaml, ...) are tried as php8x-pecl-<name>. The default image adds none to stay small.
 ARG PHP_EXTRA_EXTENSIONS=""
@@ -135,7 +135,14 @@ RUN set -eux; \
         php${PHP_VERSION}-bcmath${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
         php${PHP_VERSION}-ctype${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
         php${PHP_VERSION}-iconv${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
-        php${PHP_VERSION}-session${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}}; \
+        php${PHP_VERSION}-session${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-sodium${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-pgsql${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-pdo_pgsql${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-sqlite3${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-pdo_sqlite${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
+        php${PHP_VERSION}-pecl-apcu \
+        php${PHP_VERSION}-pecl-igbinary; \
     # Optional packages: opcache is compiled into the core package from PHP 8.5, and
     # pecl-imagick lags new PHP majors in Alpine. Missing ones are reported, not fatal.
     for optional in "opcache${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}}" pecl-imagick; do \

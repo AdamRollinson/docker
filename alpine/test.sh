@@ -110,7 +110,7 @@ test_php() {
     warnings=$(docker run --rm "$img" php -r 'echo 1;' 2>&1 | grep -c "Warning" || true)
     [ "$warnings" = "0" ] && pass "no startup warnings" || fail "$warnings startup warning(s)" "$(docker run --rm "$img" php -r 'echo 1;' 2>&1 | head -5)"
     local missing
-    missing=$(docker run --rm "$img" php -r 'foreach (["curl","mbstring","intl","pdo_mysql","mysqli","gd","zip","soap","redis","openssl","sockets","Zend OPcache"] as $e) if (!extension_loaded($e)) echo $e, " ";')
+    missing=$(docker run --rm "$img" php -r 'foreach (["curl","mbstring","intl","pdo_mysql","mysqli","gd","zip","soap","redis","openssl","sockets","sodium","pgsql","pdo_pgsql","sqlite3","pdo_sqlite","apcu","igbinary","Zend OPcache"] as $e) if (!extension_loaded($e)) echo $e, " ";')
     [ -z "$missing" ] && pass "required extensions loaded" || fail "extensions missing: $missing"
     local mismatched
     mismatched=$(docker run --rm --entrypoint sh "$img" -c 'apk list -I 2>/dev/null | awk "{print \$1}" | grep "^php" | grep -v -- "-pecl-" | grep -v -- "-$(php -r "echo PHP_VERSION;" | tr "A-Z" "a-z" | sed -E "s/([0-9])(rc|beta|alpha)/\1_\2/")-r" || true')
