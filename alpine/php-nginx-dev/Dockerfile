@@ -26,6 +26,10 @@ ENV PHP_DEBUGGER=xdebug \
     PHP_ERROR_REPORTING=E_ALL \
     PHP_INI_SCAN_DIR=:/run/php/conf.d
 
+# Set by CI to a hash of the Alpine package indexes (alpine/apk-index-hash.sh) so this layer
+# is rebuilt whenever Alpine publishes new packages instead of being reused from the cache
+ARG APK_INDEX_HASH=""
+
 # Install Xdebug from the same edge repos as PHP, then remove the package's always-on ini so
 # loading is controlled at runtime by PHP_DEBUGGER
 RUN set -eux; \

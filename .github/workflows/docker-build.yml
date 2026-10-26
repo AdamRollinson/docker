@@ -47,6 +47,8 @@ jobs:
     outputs:
       matrix: ${{ steps.versions.outputs.matrix }}
       build_matrix: ${{ steps.versions.outputs.build_matrix }}
+      apk_stable: ${{ steps.apk.outputs.stable }}
+      apk_all: ${{ steps.apk.outputs.all }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -72,8 +74,21 @@ jobs:
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
           echo "build_matrix=$build_matrix" >> "$GITHUB_OUTPUT"
 
+      # Passed to every build as APK_INDEX_HASH, declared just before each apk step, so a cached
+      # apk layer is only reused while Alpine has published nothing new. Without it the weekly run
+      # reuses the first build's packages and never picks up Alpine security fixes.
+      - name: Hash Alpine package indexes
+        id: apk
+        run: |
+          stable=$(alpine/apk-index-hash.sh stable)
+          all=$(alpine/apk-index-hash.sh all)
+          echo "Alpine package index hashes: stable=$stable all=$all"
+          echo "stable=$stable" >> "$GITHUB_OUTPUT"
+          echo "all=$all" >> "$GITHUB_OUTPUT"
+
   # ---- Base image ---------------------------------------------------------------------------
   build-base:
+    needs: php-matrix
     strategy:
       fail-fast: false
       matrix:
@@ -103,6 +118,8 @@ jobs:
           platforms: ${{ matrix.platform }}
           context: ./alpine/base
           cache-from: type=gha,scope=base-${{ matrix.arch }}
+          build-args: |
+            APK_INDEX_HASH=${{ needs.php-matrix.outputs.apk_stable }}
           cache-to: type=gha,mode=max,scope=base-${{ matrix.arch }}
           load: true
           tags: local/${{ env.BASE_IMAGE }}
@@ -132,6 +149,8 @@ jobs:
           platforms: ${{ matrix.platform }}
           context: ./alpine/base
           cache-from: type=gha,scope=base-${{ matrix.arch }}
+          build-args: |
+            APK_INDEX_HASH=${{ needs.php-matrix.outputs.apk_stable }}
           outputs: type=image,name=${{ env.DOCKER_REGISTRY }}/${{ env.BASE_IMAGE }},push-by-digest=true,name-canonical=true,push=true
           provenance: true
           sbom: true
@@ -258,6 +277,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=php-${{ matrix.minor }}-${{ matrix.arch }}
           pull: true
           build-args: |
+            APK_INDEX_HASH=${{ needs.php-matrix.outputs.apk_all }}
             PHP_VERSION=${{ env.PHP_VERSION }}
             PHP_PATCH_VERSION=${{ matrix.patch }}
           load: true
@@ -287,6 +307,7 @@ jobs:
           context: ./alpine/php
           cache-from: type=gha,scope=php-${{ matrix.minor }}-${{ matrix.arch }}
           build-args: |
+            APK_INDEX_HASH=${{ needs.php-matrix.outputs.apk_all }}
             PHP_VERSION=${{ env.PHP_VERSION }}
             PHP_PATCH_VERSION=${{ matrix.patch }}
           outputs: type=image,name=${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }},push-by-digest=true,name-canonical=true,push=true
@@ -302,6 +323,7 @@ jobs:
           cache-from: type=gha,scope=php-nginx-${{ matrix.minor }}-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=php-nginx-${{ matrix.minor }}-${{ matrix.arch }}
           build-args: |
+            APK_INDEX_HASH=${{ needs.php-matrix.outputs.apk_all }}
             PHP_IMAGE=${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}@${{ steps.php.outputs.digest }}
             PHP_IMAGE_TAG=${{ matrix.tag }}
             PHP_VERSION=${{ env.PHP_VERSION }}
@@ -332,6 +354,7 @@ jobs:
           context: ./alpine/php-nginx
           cache-from: type=gha,scope=php-nginx-${{ matrix.minor }}-${{ matrix.arch }}
           build-args: |
+            APK_INDEX_HASH=${{ needs.php-matrix.outputs.apk_all }}
             PHP_IMAGE=${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}@${{ steps.php.outputs.digest }}
             PHP_IMAGE_TAG=${{ matrix.tag }}
             PHP_VERSION=${{ env.PHP_VERSION }}
@@ -348,6 +371,7 @@ jobs:
           cache-from: type=gha,scope=php-nginx-dev-${{ matrix.minor }}-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=php-nginx-dev-${{ matrix.minor }}-${{ matrix.arch }}
           build-args: |
+            APK_INDEX_HASH=${{ needs.php-matrix.outputs.apk_all }}
             PHP_IMAGE=${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}@${{ steps.php-nginx.outputs.digest }}
             PHP_IMAGE_TAG=${{ matrix.tag }}
             PHP_VERSION=${{ env.PHP_VERSION }}
@@ -378,6 +402,7 @@ jobs:
           context: ./alpine/php-nginx-dev
           cache-from: type=gha,scope=php-nginx-dev-${{ matrix.minor }}-${{ matrix.arch }}
           build-args: |
+            APK_INDEX_HASH=${{ needs.php-matrix.outputs.apk_all }}
             PHP_IMAGE=${{ env.DOCKER_REGISTRY }}/${{ env.PHP_NGINX_IMAGE }}@${{ steps.php-nginx.outputs.digest }}
             PHP_IMAGE_TAG=${{ matrix.tag }}
             PHP_VERSION=${{ env.PHP_VERSION }}

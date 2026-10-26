@@ -52,6 +52,10 @@ ENV NGINX_PORT=80 \
     PHP_FPM_ERROR_LOG="" \
     PHP_FPM_SLOWLOG=""
 
+# Set by CI to a hash of the Alpine package indexes (alpine/apk-index-hash.sh) so this layer
+# is rebuilt whenever Alpine publishes new packages instead of being reused from the cache
+ARG APK_INDEX_HASH=""
+
 # Update, add testing repo, and install PHP and Nginx in a single RUN command
 # Note: apk upgrade with edge repos replaces gettext-envsubst with a Go-based
 # envsubst that strips semicolons after ${VAR} — reinstall gettext-envsubst to fix

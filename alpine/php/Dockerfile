@@ -90,6 +90,10 @@ ENV COMPOSER_HOME=/tmp/composer \
 ENV APP_INSTALL="" \
     APP_INSTALL_DIR=/app
 
+# Set by CI to a hash of the Alpine package indexes (alpine/apk-index-hash.sh) so this layer
+# is rebuilt whenever Alpine publishes new packages instead of being reused from the cache
+ARG APK_INDEX_HASH=""
+
 # Install PHP with scoped edge repos (prevents edge repos leaking to downstream images).
 # Every PHP package carries the same release pin. Alpine's extension packages depend on
 # php${PHP_VERSION}-common WITHOUT a version constraint, so when edge rolls to a new release
