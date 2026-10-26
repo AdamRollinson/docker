@@ -11,6 +11,10 @@ ENV LOG_MODE=stdout \
     LOG_FORMAT=text \
     LOG_TAG=true
 
+# Set by CI to a hash of the Alpine package indexes (alpine/apk-index-hash.sh) so this layer
+# is rebuilt whenever Alpine publishes new packages instead of being reused from the cache
+ARG APK_INDEX_HASH=""
+
 # Upgrade the Alpine release packages first so security fixes land before our own installs
 RUN apk upgrade --no-cache && \
     apk add --no-cache \
