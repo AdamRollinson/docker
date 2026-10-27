@@ -244,21 +244,12 @@ fi
 # (PHPRC points PHP at /run/php) and the FPM pool into /run/php
 render_msmtp
 envsubst < /usr/local/etc/php/php.ini.template > "${PHP_RUN_DIR}/php.ini"
-envsubst < /usr/local/etc/php/www.conf.template > "${PHP_RUN_DIR}/php-fpm.d/www.conf"
 
-# When running as non-root, php-fpm cannot switch to user/group — remove directives
-if [ "$(id -u)" != "0" ]; then
-    sed -i '/^user = /d; /^group = /d' "${PHP_RUN_DIR}/php-fpm.d/www.conf"
-fi
+# FPM master config and pool (with fpm.global.* and fpm.pool.* overrides), shared with php-fpm
+render_fpm_config
 
-# FPM master config: global settings, then fpm.global.* overrides, then the pool include
-printf '[global]\nerror_log = %s\n' "${PHP_FPM_ERROR_LOG}" > "${PHP_RUN_DIR}/php-fpm.conf"
-apply_ini_overrides fpm.global "${PHP_RUN_DIR}/php-fpm.conf"
-printf '\ninclude=%s/php-fpm.d/*.conf\n' "${PHP_RUN_DIR}" >> "${PHP_RUN_DIR}/php-fpm.conf"
-
-# Generic overrides: php.<setting> into php.ini, fpm.pool.<setting> into the [www] pool
+# Generic overrides: php.<setting> into php.ini
 apply_ini_overrides php "${PHP_RUN_DIR}/php.ini"
-apply_ini_overrides fpm.pool "${PHP_RUN_DIR}/php-fpm.d/www.conf"
 
 # Check if OPcache logging directory exists, create if needed (best-effort for non-root)
 if [ -n "$OPCACHE_ERROR_LOG" ]; then

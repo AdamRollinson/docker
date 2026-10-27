@@ -61,7 +61,7 @@ Alpine-based images for PHP 8.2 to 8.6 on amd64 and arm64. Every release is pinn
 
 ::u-page-section{class="dark:bg-neutral-950"}
 #title
-Four images, one lineage
+One lineage, from the CLI to the web stack
 
 #description
 Each image builds on the one before it, so behaviour is consistent from the CLI to the full web stack.
@@ -113,6 +113,18 @@ Each image builds on the one before it, so behaviour is consistent from the CLI 
 
   #description
   The web stack plus Xdebug, visible errors and uncached assets, tuned for local development.
+  :::
+
+  :::u-page-feature
+  ---
+  icon: i-lucide-cpu
+  to: /images/php-fpm
+  ---
+  #title
+  php-fpm
+
+  #description
+  PHP-FPM on its own, for nginx or Caddy in another container, a Compose service or a Kubernetes sidecar.
   :::
 
   :::u-page-feature

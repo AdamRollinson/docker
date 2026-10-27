@@ -1,0 +1,12 @@
+#!/bin/bash
+# Docker HEALTHCHECK for the php-fpm image: asks the pool's ping path over FastCGI and expects
+# "pong". Follows PHP_FPM_LISTEN, so a unix socket or a different port is checked correctly.
+listen="${PHP_FPM_LISTEN:-0.0.0.0:9000}"
+case "$listen" in
+    /*) target="$listen" ;;
+    *)  target="127.0.0.1:${listen##*:}" ;;
+esac
+# env -i keeps the container environment out of the FastCGI parameters
+out=$(env -i SCRIPT_NAME=/fpm-ping SCRIPT_FILENAME=/fpm-ping REQUEST_METHOD=GET \
+    /usr/bin/cgi-fcgi -bind -connect "$target" 2>/dev/null) || exit 1
+case "$out" in *pong*) exit 0 ;; *) exit 1 ;; esac

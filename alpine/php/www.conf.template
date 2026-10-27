@@ -37,8 +37,9 @@ decorate_workers_output = no
 clear_env = no
 security.limit_extensions = .php
 
-; Status and ping endpoints. Only reachable through the metrics listener (NGINX_METRICS_PORT);
-; the application server block never routes these paths to FPM.
+; Status and ping endpoints. In php-nginx they are only reachable through the metrics listener
+; (NGINX_METRICS_PORT); the application server block never routes these paths to FPM. In php-fpm
+; anything that can reach the FastCGI port can ask for them, as with any FPM container.
 pm.status_path = /fpm-status
 ping.path = /fpm-ping
 ping.response = pong

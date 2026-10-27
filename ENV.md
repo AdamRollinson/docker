@@ -83,7 +83,8 @@ Standard Composer variables with container-friendly defaults: **`COMPOSER_HOME`*
 - **`PHP_FPM_SLOWLOG`**: Slow request log. Empty by default, which resolves to `/proc/self/fd/2` or `/var/log/php-fpm/slow.log` when `LOG_MODE=file`.
 - **`fpm.pool.<setting>`**: Appended to the `[www]` pool, e.g. `fpm.pool.pm.max_children=50`.
 - **`fpm.global.<setting>`**: Appended to the FPM `[global]` section, e.g. `fpm.global.log_level=debug`.
-- **`PHP_FPM_LISTEN`**: Defines the address on which PHP-FPM will listen. Default is `127.0.0.1:9000`.
+- **`PHP_FPM_LISTEN`**: Defines the address on which PHP-FPM will listen. Default is `127.0.0.1:9000` in php-nginx and `0.0.0.0:9000` in php-fpm. A path listens on a unix socket.
+- **`PHP_FPM_LISTEN_ALLOWED_CLIENTS`**: Comma-separated addresses allowed to connect to a TCP listener (`listen.allowed_clients`). Empty allows any; `127.0.0.1` is always added so the healthcheck works.
 - **`PHP_FPM_MAX_CHILDREN`**: Sets the maximum number of child processes to be created. Default is `30`.
 - **`PHP_FPM_START_SERVERS`**: Sets the number of child processes created on startup. Default is `5`.
 - **`PHP_FPM_MIN_SPARE_SERVERS`**: Sets the minimum number of idle child processes. Default is `3`.
@@ -123,6 +124,10 @@ All SSL settings are opt-in. When `NGINX_SSL_ENABLED` is `false` (the default), 
 - **`NGINX_SSL_SELF_SIGNED_DAYS`**: Validity period in days for the self-signed certificate. Default is `365`.
 - **`NGINX_SSL_HSTS`**: Enable `Strict-Transport-Security` header on HTTPS responses. Default is `true`.
 - **`NGINX_SSL_HSTS_MAX_AGE`**: HSTS max-age value in seconds. Default is `63072000` (2 years).
+
+## `alpine/php-fpm/Dockerfile`
+
+PHP-FPM without a web server. Uses the PHP-FPM settings above with `PHP_FPM_LISTEN=0.0.0.0:9000` and `APP_INSTALL_DIR=/var/www/html`; `PHP_SESSION_COOKIE_SECURE` defaults to `Off` because TLS terminates in the web server container.
 
 ## `alpine/php-nginx-dev/Dockerfile`
 

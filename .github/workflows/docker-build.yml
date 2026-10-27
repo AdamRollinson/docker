@@ -30,6 +30,7 @@ env:
   PHP_IMAGE: php
   PHP_NGINX_IMAGE: php-nginx
   PHP_NGINX_DEV_IMAGE: php-nginx-dev
+  PHP_FPM_IMAGE: php-fpm
   BUILDX_VERSION: v0.38.1
   # Images are pushed under this tag first, scanned, and only then promoted to their real tags
   CANDIDATE_TAG: candidate-${{ github.sha }}
@@ -410,13 +411,58 @@ jobs:
           provenance: true
           sbom: true
 
+      # ---- PHP-FPM image (FROM the php digest, alongside php-nginx) -------------
+      - name: Build PHP-FPM Image (${{ matrix.minor }}, ${{ matrix.arch }}) locally
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          platforms: ${{ matrix.platform }}
+          context: ./alpine/php-fpm
+          cache-from: type=gha,scope=php-fpm-${{ matrix.minor }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=php-fpm-${{ matrix.minor }}-${{ matrix.arch }}
+          build-args: |
+            PHP_IMAGE=${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}@${{ steps.php.outputs.digest }}
+            PHP_IMAGE_TAG=${{ matrix.tag }}
+            PHP_VERSION=${{ env.PHP_VERSION }}
+          load: true
+          tags: local/${{ env.PHP_FPM_IMAGE }}
+          provenance: false
+          sbom: false
+
+      - name: Run Trivy vulnerability scanner on PHP-FPM Image (${{ matrix.minor }}, ${{ matrix.arch }})
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: local/${{ env.PHP_FPM_IMAGE }}
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
+
+      - name: Smoke test PHP-FPM Image (${{ matrix.minor }}, ${{ matrix.arch }})
+        run: alpine/test.sh php-fpm local/${{ env.PHP_FPM_IMAGE }} ${{ matrix.patch }}
+
+      - name: Build PHP-FPM Image (${{ matrix.minor }}, ${{ matrix.arch }}) by digest
+        id: php-fpm
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          platforms: ${{ matrix.platform }}
+          context: ./alpine/php-fpm
+          cache-from: type=gha,scope=php-fpm-${{ matrix.minor }}-${{ matrix.arch }}
+          build-args: |
+            PHP_IMAGE=${{ env.DOCKER_REGISTRY }}/${{ env.PHP_IMAGE }}@${{ steps.php.outputs.digest }}
+            PHP_IMAGE_TAG=${{ matrix.tag }}
+            PHP_VERSION=${{ env.PHP_VERSION }}
+          outputs: type=image,name=${{ env.DOCKER_REGISTRY }}/${{ env.PHP_FPM_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          provenance: true
+          sbom: true
+
       # One file per image, named "<image> <digest>", so the publish job can join them
       - name: Export digests
         run: |
           mkdir -p "${{ runner.temp }}/digests"
           for pair in "${PHP_IMAGE} ${{ steps.php.outputs.digest }}" \
                       "${PHP_NGINX_IMAGE} ${{ steps.php-nginx.outputs.digest }}" \
-                      "${PHP_NGINX_DEV_IMAGE} ${{ steps.php-nginx-dev.outputs.digest }}"; do
+                      "${PHP_NGINX_DEV_IMAGE} ${{ steps.php-nginx-dev.outputs.digest }}" \
+                      "${PHP_FPM_IMAGE} ${{ steps.php-fpm.outputs.digest }}"; do
             set -- $pair
             touch "${{ runner.temp }}/digests/$1 ${2#sha256:}"
           done
@@ -441,6 +487,10 @@ jobs:
       matrix: ${{ fromJSON(needs.php-matrix.outputs.matrix) }}
     runs-on: ubuntu-24.04
     steps:
+      # Every image published for this minor, in dependency order (php before the images on it)
+      - name: Select images (${{ matrix.minor }})
+        run: echo "IMAGES=${PHP_IMAGE} ${PHP_NGINX_IMAGE} ${PHP_NGINX_DEV_IMAGE} ${PHP_FPM_IMAGE}" >> "$GITHUB_ENV"
+
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -468,7 +518,7 @@ jobs:
       - name: Create candidate manifest lists (${{ matrix.minor }})
         working-directory: ${{ runner.temp }}/digests
         run: |
-          for repo in "${PHP_IMAGE}" "${PHP_NGINX_IMAGE}" "${PHP_NGINX_DEV_IMAGE}"; do
+          for repo in ${IMAGES}; do
             refs=$(for f in "${repo} "*; do printf '%s@sha256:%s ' "${DOCKER_REGISTRY}/${repo}" "${f#* }"; done)
             [ "$(echo $refs | wc -w)" -eq 2 ] || { echo "expected one ${repo} digest per architecture, found: $(ls)"; exit 1; }
             docker buildx imagetools create -t "${DOCKER_REGISTRY}/${repo}:${CANDIDATE_TAG}-${{ matrix.minor }}" $refs
@@ -498,11 +548,19 @@ jobs:
           file: .vex/openvex.json
           predicate-type: https://openvex.dev/ns/v0.2.0
 
+      - name: Attach VEX attestation to PHP-FPM Image (${{ matrix.minor }}) candidate
+        uses: docker/scout-action@221e7f4860634eeb1579e3bd7ca232e577bd1864 # v1.26.0
+        with:
+          command: attestation-add
+          image: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_FPM_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
+          file: .vex/openvex.json
+          predicate-type: https://openvex.dev/ns/v0.2.0
+
       # The moving tag (matrix.tag: the minor, or a channel tag such as 8.6-rc for a pre-release)
       # and the immutable exact tag, in dependency order so php exists before php-nginx is visible
       - name: Promote images (${{ matrix.minor }})
         run: |
-          for repo in "${PHP_IMAGE}" "${PHP_NGINX_IMAGE}" "${PHP_NGINX_DEV_IMAGE}"; do
+          for repo in ${IMAGES}; do
             docker buildx imagetools create \
               -t "${DOCKER_REGISTRY}/${repo}:${{ matrix.tag }}" \
               -t "${DOCKER_REGISTRY}/${repo}:${{ matrix.patch }}" \
@@ -513,14 +571,14 @@ jobs:
       # workflow on the main branch; see docs/security/scanning-and-attestations for how to verify.
       - name: Sign images (${{ matrix.minor }})
         run: |
-          for repo in "${PHP_IMAGE}" "${PHP_NGINX_IMAGE}" "${PHP_NGINX_DEV_IMAGE}"; do
+          for repo in ${IMAGES}; do
             digest=$(docker buildx imagetools inspect "${DOCKER_REGISTRY}/${repo}:${{ matrix.tag }}" --format '{{.Manifest.Digest}}')
             cosign sign --yes --recursive "${DOCKER_REGISTRY}/${repo}@${digest}"
           done
 
       - name: Verify Built Images
         run: |
-          for repo in "${PHP_IMAGE}" "${PHP_NGINX_IMAGE}" "${PHP_NGINX_DEV_IMAGE}"; do
+          for repo in ${IMAGES}; do
             docker buildx imagetools inspect "${DOCKER_REGISTRY}/${repo}:${{ matrix.tag }}"
           done
 
@@ -547,7 +605,7 @@ jobs:
           token=$(curl -sS -H "Content-Type: application/json" -X POST \
             -d "{\"username\": \"${DOCKER_USER}\", \"password\": \"${DOCKER_PAT}\"}" \
             https://hub.docker.com/v2/users/login/ | jq -r .token)
-          for repo in "${PHP_IMAGE}" "${PHP_NGINX_IMAGE}" "${PHP_NGINX_DEV_IMAGE}"; do
+          for repo in ${IMAGES}; do
             curl -sS -o /dev/null -w "delete ${repo}:${CANDIDATE_TAG}-${{ matrix.minor }} -> %{http_code}\n" -X DELETE \
               -H "Authorization: JWT ${token}" \
               "https://hub.docker.com/v2/repositories/${DOCKER_REGISTRY}/${repo}/tags/${CANDIDATE_TAG}-${{ matrix.minor }}/"

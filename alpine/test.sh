@@ -7,6 +7,7 @@
 #   alpine/test.sh php           IMAGE EXPECTED_PHP_VERSION
 #   alpine/test.sh php-nginx     IMAGE EXPECTED_PHP_VERSION
 #   alpine/test.sh php-nginx-dev IMAGE EXPECTED_PHP_VERSION
+#   alpine/test.sh php-fpm       IMAGE EXPECTED_PHP_VERSION
 #   alpine/test.sh all           MINOR            # local images rollogi/*:MINOR (or *:MINOR-rc for a pre-release), version from php-versions.txt
 #
 # Exits non-zero on the first failing check. Needs docker and curl.
@@ -16,8 +17,10 @@ set -euo pipefail
 PREFIX="${IMAGE_PREFIX:-rollogi}"
 WORK=$(mktemp -d)
 CONTAINERS=()
+NETWORKS=()
 cleanup() {
     for c in "${CONTAINERS[@]:-}"; do [ -n "$c" ] && docker rm -f "$c" >/dev/null 2>&1 || true; done
+    for n in "${NETWORKS[@]:-}"; do [ -n "$n" ] && docker network rm "$n" >/dev/null 2>&1 || true; done
     rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -110,7 +113,7 @@ test_php() {
     warnings=$(docker run --rm "$img" php -r 'echo 1;' 2>&1 | grep -c "Warning" || true)
     [ "$warnings" = "0" ] && pass "no startup warnings" || fail "$warnings startup warning(s)" "$(docker run --rm "$img" php -r 'echo 1;' 2>&1 | head -5)"
     local missing
-    missing=$(docker run --rm "$img" php -r 'foreach (["curl","mbstring","intl","pdo_mysql","mysqli","gd","zip","soap","redis","openssl","sockets","Zend OPcache"] as $e) if (!extension_loaded($e)) echo $e, " ";')
+    missing=$(docker run --rm "$img" php -r 'foreach (["curl","mbstring","intl","pdo_mysql","mysqli","gd","zip","soap","redis","openssl","sockets","sodium","pgsql","pdo_pgsql","sqlite3","pdo_sqlite","apcu","igbinary","Zend OPcache"] as $e) if (!extension_loaded($e)) echo $e, " ";')
     [ -z "$missing" ] && pass "required extensions loaded" || fail "extensions missing: $missing"
     local mismatched
     mismatched=$(docker run --rm --entrypoint sh "$img" -c 'apk list -I 2>/dev/null | awk "{print \$1}" | grep "^php" | grep -v -- "-pecl-" | grep -v -- "-$(php -r "echo PHP_VERSION;" | tr "A-Z" "a-z" | sed -E "s/([0-9])(rc|beta|alpha)/\1_\2/")-r" || true')
@@ -315,11 +318,82 @@ test_php_nginx_dev() {
     docker rm -f "$cid" >/dev/null
 }
 
+# FastCGI request to a php-fpm container from another container on the same network, the way a
+# web server sidecar talks to it. Prints the raw response (headers, blank line, body).
+fcgi_request() { # IMAGE NETWORK HOST:PORT SCRIPT_NAME [SCRIPT_FILENAME]
+    local img=$1 net=$2 target=$3 name=$4 file=${5:-$4}
+    docker run --rm --network "$net" --entrypoint /usr/bin/env "$img" -i \
+        SCRIPT_NAME="$name" SCRIPT_FILENAME="$file" REQUEST_METHOD=GET \
+        /usr/bin/cgi-fcgi -bind -connect "$target" 2>/dev/null
+}
+
+wait_fpm_healthy() { # CONTAINER
+    for _ in $(seq 1 40); do docker exec "$1" php-fpm-healthcheck >/dev/null 2>&1 && return 0; sleep 0.5; done
+    return 1
+}
+
+test_php_fpm() {
+    local img=$1 expected; expected=$(normalise "$2")
+    echo "== php-fpm: $img (expect $2)"
+    test_common "$img"
+    make_fixture
+    local net cid name out
+    net="fpmtest-$$-$RANDOM"; docker network create "$net" >/dev/null; NETWORKS+=("$net")
+    name="fpm-$$-$RANDOM"
+    cid=$(docker run -d --rm --network "$net" --name "$name" -e "php.memory_limit=222M" -e "fpm.pool.pm.max_children=40" \
+        -e APP_INSTALL='echo fpm prepared in $(pwd)' -v "$WORK/www:/var/www/html:ro" "$img"); CONTAINERS+=("$cid")
+    wait_fpm_healthy "$cid" && pass "healthcheck answers pong over FastCGI" || fail "php-fpm did not become healthy" "$(docker logs "$cid" 2>&1 | tail -5)"
+    out=$(fcgi_request "$img" "$net" "${name}:9000" /index.php /var/www/html/index.php)
+    local body; body=$(printf '%s' "$out" | tr -d '\r' | awk 'f; /^$/ {f=1}')
+    [ "$(normalise "${body%% *}")" = "$expected" ] && [[ "$body" == *" 222M "* ]] && pass "serves PHP $2 to another container with php.* override applied" || fail "unexpected FastCGI response" "$out"
+    printf '%s' "$out" | tr -d '\r' | grep -qi '^X-Powered-By' && fail "X-Powered-By header exposed" || pass "X-Powered-By hidden"
+    fcgi_request "$img" "$net" "${name}:9000" /fpm-status | grep -q '^pool:' && pass "pool status at /fpm-status" || fail "fpm-status missing"
+    docker exec "$cid" sh -c 'grep -E "^pm.max_children" /run/php/php-fpm.d/www.conf | tail -1' | grep -q 40 && pass "fpm.pool.* override applied" || fail "fpm.pool.* override ignored"
+    log_has "$cid" '^\[install\] fpm prepared in /var/www/html' && pass "APP_INSTALL runs in /var/www/html before php-fpm" || fail "APP_INSTALL output missing" "$(docker logs "$cid" 2>&1 | head -5)"
+    local untagged
+    untagged=$(docker logs "$cid" 2>&1 | grep -cvE '^\[(entrypoint|install|php-fpm)\]' || true)
+    [ "$untagged" = "0" ] && pass "all log lines tagged by service" || fail "$untagged untagged log line(s)" "$(docker logs "$cid" 2>&1 | grep -vE '^\[(entrypoint|install|php-fpm)\]' | head -3)"
+    docker exec "$cid" sh -c '! test -w /etc/php*/php.ini && ! test -w /usr/local/etc/php/www.conf.template' \
+        && pass "/etc and template config not writable by runtime user" || fail "config writable by runtime user"
+    docker rm -f "$cid" >/dev/null
+
+    # listen.allowed_clients: remote clients refused, the local healthcheck still allowed
+    name="fpm-$$-$RANDOM"
+    cid=$(docker run -d --rm --network "$net" --name "$name" -e PHP_FPM_LISTEN_ALLOWED_CLIENTS=127.0.0.1 \
+        -v "$WORK/www:/var/www/html:ro" "$img"); CONTAINERS+=("$cid")
+    wait_fpm_healthy "$cid" && pass "healthcheck allowed with PHP_FPM_LISTEN_ALLOWED_CLIENTS" || fail "healthcheck refused by allowed_clients"
+    fcgi_request "$img" "$net" "${name}:9000" /fpm-ping | grep -q pong && fail "remote client not refused by PHP_FPM_LISTEN_ALLOWED_CLIENTS" || pass "remote clients refused by PHP_FPM_LISTEN_ALLOWED_CLIENTS"
+    docker rm -f "$cid" >/dev/null
+
+    # arbitrary --user, root mode and the read-only root filesystem recipe
+    cid=$(docker run -d --rm --user 4321:4321 -e "php.memory_limit=345M" "$img"); CONTAINERS+=("$cid")
+    wait_fpm_healthy "$cid" && pass "healthy under an arbitrary --user" || fail "php-fpm failed under --user 4321" "$(docker logs "$cid" 2>&1 | tail -5)"
+    docker exec "$cid" sh -c 'ps -o user,args | grep php-fpm | grep -v grep | grep -vq "^4321 "' && fail "a php-fpm process is not running as uid 4321" || pass "php-fpm runs as uid 4321"
+    docker rm -f "$cid" >/dev/null
+    cid=$(docker run -d --rm --user root "$img"); CONTAINERS+=("$cid")
+    wait_fpm_healthy "$cid" && pass "root mode healthy" || fail "root mode failed" "$(docker logs "$cid" 2>&1 | tail -5)"
+    docker exec "$cid" sh -c 'ps -o user,args | grep "php-fpm: pool" | grep -v grep | grep -q "^nobody"' && pass "pool workers dropped to nobody in root mode" || fail "pool workers not running as nobody"
+    docker rm -f "$cid" >/dev/null
+    cid=$(docker run -d --rm --read-only --tmpfs /run:uid=1000,gid=1000 --tmpfs /tmp --tmpfs /var/log:uid=1000,gid=1000 \
+        --cap-drop ALL --security-opt no-new-privileges "$img"); CONTAINERS+=("$cid")
+    wait_fpm_healthy "$cid" && pass "read-only rootfs recipe works" || fail "read-only rootfs recipe failed" "$(docker logs "$cid" 2>&1 | tail -5)"
+    docker rm -f "$cid" >/dev/null
+
+    # cron alongside php-fpm, and an explicit command bypasses serve
+    cid=$(docker run -d --rm -e CRON_SCHEDULE='*/1 * * * * * *' -e CRON_COMMAND='echo fpm-cron-tick' "$img"); CONTAINERS+=("$cid")
+    sleep 3
+    log_has "$cid" '^\[cron\] fpm-cron-tick' && pass "cron runs alongside php-fpm" || fail "cron did not run" "$(docker logs "$cid" 2>&1 | tail -5)"
+    docker rm -f "$cid" >/dev/null
+    out=$(docker run --rm "$img" php -r 'echo "explicit";' 2>/dev/null)
+    [ "$out" = "explicit" ] && pass "an explicit command runs instead of php-fpm" || fail "explicit command output unexpected: '$out'"
+}
+
 case "${1:-}" in
     base)          test_base "$2" ;;
     php)           test_php "$2" "$3" ;;
     php-nginx)     test_php_nginx "$2" "$3" ;;
     php-nginx-dev) test_php_nginx_dev "$2" "$3" ;;
+    php-fpm)       test_php_fpm "$2" "$3" ;;
     all)
         minor="${2:?usage: test.sh all MINOR}"
         version=$(grep -E "^${minor//./\\.} " "$(dirname "$0")/php-versions.txt" | awk '{print $2}')
@@ -330,7 +404,8 @@ case "${1:-}" in
         test_php "$PREFIX/php:$tag" "$version"
         test_php_nginx "$PREFIX/php-nginx:$tag" "$version"
         test_php_nginx_dev "$PREFIX/php-nginx-dev:$tag" "$version"
+        test_php_fpm "$PREFIX/php-fpm:$tag" "$version"
         ;;
-    *) sed -n '3,12p' "$0"; exit 2 ;;
+    *) sed -n '3,13p' "$0"; exit 2 ;;
 esac
 echo "all checks passed"
