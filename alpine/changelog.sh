@@ -24,7 +24,7 @@ changes() {
     fi
     git -C "$root" diff -U0 -- "$versions" | awk '
         /^-[0-9]/ { m = substr($1, 2); old[m] = $2 }
-        /^\+[0-9]/ { m = substr($1, 2); if (m in old) print m, old[m], $2; else print m, "(new)", $2 }'
+        /^\+[0-9]/ { m = substr($1, 2); if (!(m in old)) print m, "(new)", $2; else if (old[m] != $2) print m, old[m], $2 }'
 }
 
 lines=$(changes "$@")

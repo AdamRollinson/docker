@@ -7,7 +7,7 @@ FROM ${PHP_IMAGE}
 # Switch to root for package installation
 USER root
 
-# PHP minor without dots, used in Alpine package names (e.g. 84)
+# PHP minor without dots (e.g. 84)
 ARG PHP_VERSION
 
 # Development defaults: Xdebug on demand, errors shown, static assets never cached.
@@ -30,15 +30,19 @@ ENV PHP_DEBUGGER=xdebug \
 # is rebuilt whenever Alpine publishes new packages instead of being reused from the cache
 ARG APK_INDEX_HASH=""
 
-# Install Xdebug from the same edge repos as PHP, then remove the package's always-on ini so
-# loading is controlled at runtime by PHP_DEBUGGER
+# Compile Xdebug against the php image's headers, at the version its pecl-extensions.txt lists
+# for this minor, with a throwaway toolchain. It is installed without an ini file so loading is
+# controlled at runtime by PHP_DEBUGGER.
 RUN set -eux; \
-    apk add --no-cache \
-        --repository=https://dl-cdn.alpinelinux.org/alpine/edge/main \
-        --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community \
-        --repository=https://dl-cdn.alpinelinux.org/alpine/edge/testing \
-        php${PHP_VERSION}-pecl-xdebug; \
-    rm -f /etc/php${PHP_VERSION}/conf.d/*xdebug*.ini; \
+    apk upgrade --no-cache; \
+    apk add --no-cache --virtual .xdebug-build autoconf file g++ gcc make musl-dev linux-headers zlib-dev; \
+    minor="${PHP_PATCH_VERSION%.*}"; \
+    xdebug="$(awk -v m="${minor}" '$1 == "dev" && $2 == "xdebug" { for (i = 5; i <= NF; i++) if ($i == "*" || $i == m) { print $3, $4; exit } }' /usr/local/etc/php/pecl-extensions.txt)"; \
+    if [ -z "${xdebug}" ]; then \
+        echo "ERROR: /usr/local/etc/php/pecl-extensions.txt has no xdebug line for PHP ${minor}"; exit 1; \
+    fi; \
+    php-ext-install --no-enable xdebug ${xdebug}; \
+    apk del --no-network .xdebug-build; \
     mkdir -p /run/php/conf.d; \
     chown appuser:appuser /run/php/conf.d; \
     chmod 1777 /run/php/conf.d; \

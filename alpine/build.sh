@@ -11,7 +11,7 @@ PHP_NGINX_DEV_IMAGE="rollogi/php-nginx-dev"
 PHP_FPM_IMAGE="rollogi/php-fpm"
 PHP_VERSIONS_FILE="$(dirname "$0")/php-versions.txt"
 
-# Read "<minor> <release>" pairs from php-versions.txt, skipping comments and blank lines
+# Read "<minor> <release> <sha256> <url>" lines from php-versions.txt, skipping comments and blank lines
 read_php_versions() {
     grep -Ev '^[[:space:]]*(#|$)' "$PHP_VERSIONS_FILE"
 }
@@ -35,8 +35,8 @@ BASE_BUILD_ARGS=()
 echo "🚀 Building base image: $BASE_IMAGE${APP_UID:+ (uid $APP_UID${APP_GID:+:$APP_GID})}"
 docker build "${BASE_BUILD_ARGS[@]}" -t "$BASE_IMAGE" ./base
 
-# Build PHP images
-while read -r version patch; do
+# Build PHP images (compiled from the pinned php.net tarball)
+while read -r version patch sha256 url; do
     PHP_VERSION_ENV=$(echo "$version" | tr -d '.')
     CHANNEL=$(channel_tag "$version" "$patch")
     IMAGE_TAG="$PHP_IMAGE:$CHANNEL"
@@ -46,14 +46,17 @@ while read -r version patch; do
     docker build \
         --build-arg PHP_VERSION="$PHP_VERSION_ENV" \
         --build-arg PHP_PATCH_VERSION="$patch" \
+        --build-arg PHP_SOURCE_SHA256="$sha256" \
+        --build-arg PHP_SOURCE_URL="$url" \
         --build-arg PHP_EXTRA_EXTENSIONS="${PHP_EXTRA_EXTENSIONS:-}" \
+        --build-arg PHP_EXTRA_BUILD_DEPS="${PHP_EXTRA_BUILD_DEPS:-}" \
         -t "$IMAGE_TAG" \
         -t "$PATCH_TAG" \
         ./php
 done < <(read_php_versions)
 
 # Build PHP-NGINX images
-while read -r version patch; do
+while read -r version patch _; do
     PHP_VERSION_ENV=$(echo "$version" | tr -d '.')
     CHANNEL=$(channel_tag "$version" "$patch")
     IMAGE_TAG="$PHP_NGINX_IMAGE:$CHANNEL"
@@ -69,7 +72,7 @@ while read -r version patch; do
 done < <(read_php_versions)
 
 # Build PHP-NGINX-DEV images
-while read -r version patch; do
+while read -r version patch _; do
     PHP_VERSION_ENV=$(echo "$version" | tr -d '.')
     CHANNEL=$(channel_tag "$version" "$patch")
     IMAGE_TAG="$PHP_NGINX_DEV_IMAGE:$CHANNEL"
@@ -85,7 +88,7 @@ while read -r version patch; do
 done < <(read_php_versions)
 
 # Build PHP-FPM images (on the php image, without a web server)
-while read -r version patch; do
+while read -r version patch _; do
     PHP_VERSION_ENV=$(echo "$version" | tr -d '.')
     CHANNEL=$(channel_tag "$version" "$patch")
     IMAGE_TAG="$PHP_FPM_IMAGE:$CHANNEL"

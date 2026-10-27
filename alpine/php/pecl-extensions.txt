@@ -1,0 +1,23 @@
+# PECL extensions compiled into the images, one per line:
+#   <image> <extension> <version or https:// URL> <sha256 of the archive> <minors, or *>
+#
+# image is php (built into the php image and everything on top of it) or dev (php-nginx-dev
+# only). Lines are built in order, so igbinary and msgpack come before redis, which is
+# compiled with both serialisers. A minor that no line lists simply does not get that extension
+# (imagick has no PHP 8.6 support yet). igbinary, msgpack, apcu and redis on 8.6 are unreleased upstream
+# commits with the PHP 8.6 build fixes, until releases carry them. The php image ships this file at
+# /usr/local/etc/php/pecl-extensions.txt, which is where php-nginx-dev reads its xdebug line.
+#
+# alpine/check-php-versions.sh reports newer PECL releases and --update applies patch
+# releases within the same major.minor; anything larger is a manual change.
+php igbinary 3.2.17RC1 91da821443db125282a6aea039f24588dd28ff5d71e8187f6ecc41165bceafbc 8.2 8.3 8.4 8.5
+php igbinary https://github.com/igbinary/igbinary/archive/2b1f5d62e3037b07c2a46499ac32091cdb41fb40.tar.gz 1664c973d836ae7f0dfa92dbbc04504d506f8caf7c14db27e245646aaaceeab8 8.6
+php msgpack 3.0.1 e30be355ab79aaea4568692fbd6073fd7c7f50ea8d3cf12edce40fc0c921d868 8.2 8.3 8.4 8.5
+php msgpack https://github.com/msgpack/msgpack-php/archive/4a6890850a9065f9a211951df4fc39c5a4c498ab.tar.gz 57eb27e850211377a1bd04098e1e900608ac38f05bf94cdda4ae44adbb4c691a 8.6
+php apcu 5.1.28 ca9c1820810a168786f8048a4c3f8c9e3fd941407ad1553259fb2e30b5f057bf 8.2 8.3 8.4 8.5
+php apcu https://github.com/krakjoe/apcu/archive/ebbcd3d153df21eaee3395413de515a30b48ef05.tar.gz 2390f6268d9d95dcc0401d4c90154c1dc4176b5250c45917266de1a6d86ed9ce 8.6
+php redis 6.3.0 0d5141f634bd1db6c1ddcda053d25ecf2c4fc1c395430d534fd3f8d51dd7f0b5 8.2 8.3 8.4 8.5
+php redis https://github.com/phpredis/phpredis/archive/10ae0080a333e86adf1ad850d5728b619473d62e.tar.gz d3fb22471331827291031dd3b3b90f83c1ee21c0f65ed7ce6df492cd36c17172 8.6
+php imagick 3.8.1 3a3587c0a524c17d0dad9673a160b90cd776e836838474e173b549ed864352ee 8.2 8.3 8.4 8.5
+dev xdebug 3.5.3 f073de91bea046106abf4d6071c963ea71e58571df6ce58948ceca89d121cb2d 8.2 8.3 8.4 8.5
+dev xdebug https://xdebug.org/files/xdebug-3.6.0alpha1.tgz 5f464dfbba2f2aec384f9a10cb42cbfb2b3c07274b70491c46080b707271fcde 8.6

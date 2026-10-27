@@ -18,14 +18,14 @@ Full documentation: https://docker.rollogi.co.uk (source in `docs/`). This READM
 
 Each image is published under two tags: the minor version (`php:8.4`, tracks the latest pinned release) and the exact release (`php:8.4.27`, immutable). Pin the exact tag in production if you want to control when PHP updates roll out.
 
-Pre-releases live on a channel tag. PHP 8.6 is built from Alpine's testing repository while it is a release candidate and published as `php:8.6-rc` (moves with each candidate) plus the exact tag in Alpine's spelling, `php:8.6.0_rc3`. The bare `php:8.6` tag does not exist until 8.6.0 is pinned, so nothing tracking a minor tag can receive a release candidate by accident; when 8.6.0 lands the bump creates `php:8.6` and `php:8.6-rc` stops moving. Treat the channel as experimental: the `imagick` extension is not yet packaged for 8.6, and from 8.5 onward OPcache is compiled into PHP itself rather than installed as a separate package.
+Pre-releases live on a channel tag. PHP 8.6 is compiled from the release manager's tarball on downloads.php.net while it is a release candidate and published as `php:8.6-rc` (moves with each candidate) plus the exact tag in Alpine's spelling, `php:8.6.0_rc4` (php.net's `8.6.0RC4`). The bare `php:8.6` tag does not exist until 8.6.0 is pinned, so nothing tracking a minor tag can receive a release candidate by accident; when 8.6.0 lands the bump creates `php:8.6` and `php:8.6-rc` stops moving. Treat the channel as experimental: the `imagick` extension does not support 8.6 yet, and Xdebug on 8.6 is an alpha from xdebug.org.
 
 ### Image inheritance
 
 ```
 Alpine 3.24
   └── base (tini, supercronic, bash, curl, git, envsubst)
-        └── php:{version} (PHP CLI, Composer, extensions)
+        └── php:{version} (PHP CLI + FPM compiled from source, Composer, extensions)
               ├── php-nginx:{version} (Nginx, PHP-FPM, SSL support)
               │     └── php-nginx-dev:{version} (Xdebug, dev defaults)
               └── php-fpm:{version} (PHP-FPM only, FastCGI healthcheck)
@@ -359,11 +359,11 @@ See [ENV.md](ENV.md) for the complete variable reference including OPcache, secu
 
 ### PHP extensions (included)
 
-apcu, bcmath, ctype, curl, dom, exif, fileinfo, gd, iconv, igbinary, intl, json, mbstring, msgpack, mysqli, opcache, pcntl, pdo, pdo_mysql, pdo_pgsql, pdo_sqlite, pgsql, phar, posix, redis, session, simplexml, soap, sockets, sodium, sqlite3, tokenizer, xml, xmlreader, xmlwriter, zip, imagick
+apcu, bcmath, ctype, curl, dom, exif, fileinfo, gd, iconv, igbinary, intl, json, mbstring, msgpack, mysqli, opcache, pcntl, pdo, pdo_mysql, pdo_pgsql, pdo_sqlite, pgsql, phar, posix, readline, redis, session, simplexml, soap, sockets, sodium, sqlite3, tokenizer, xml, xmlreader, xmlwriter, zip, imagick
 
 MySQL, PostgreSQL and SQLite drivers, Redis and APCu are all in the default image, so a typical Laravel or Symfony application needs nothing extra. APCu is off for the CLI unless you set `php.apc.enable_cli=1`.
 
-Need more? Build your own variant with `PHP_EXTRA_EXTENSIONS`; core extensions are pinned to the PHP release and PECL ones resolve automatically:
+Need more? Build your own variant with `PHP_EXTRA_EXTENSIONS`: bundled extensions are compiled from the PHP source and anything else from the latest stable PECL release:
 
 ```bash
 docker build --build-arg PHP_VERSION=84 --build-arg PHP_PATCH_VERSION=8.4.27 \
@@ -372,9 +372,19 @@ docker build --build-arg PHP_VERSION=84 --build-arg PHP_PATCH_VERSION=8.4.27 \
 PHP_EXTRA_EXTENSIONS="ldap memcached" ./alpine/build.sh    # whole set
 ```
 
-An unavailable extension fails the build with the package names it tried, and the chosen set is recorded in the `io.rollogi.php.extra-extensions` label.
+The `-dev` packages for common extensions (amqp, bz2, ffi, gettext, gmp, ldap, memcached, tidy, xsl, yaml) are known to the build; name any others in `PHP_EXTRA_BUILD_DEPS`. Runtime libraries are detected automatically. An extension that fails to build fails the image, and the chosen set is recorded in the `io.rollogi.php.extra-extensions` label.
 
-`opcache` and `imagick` are installed when Alpine packages them for the PHP version (opcache is built in from 8.5; imagick is missing on 8.6 for now). The build logs a notice rather than failing when one is unavailable.
+The images also keep `phpize`, the PHP headers and a `php-ext-install` helper, so a derived image can compile an extension itself:
+
+```dockerfile
+FROM rollogi/php:8.4
+USER root
+RUN apk add --no-cache --virtual .build autoconf file g++ gcc make musl-dev linux-headers \
+    && php-ext-install mongodb && apk del .build
+USER appuser
+```
+
+The PECL extensions in the default image are pinned with checksums in [`alpine/php/pecl-extensions.txt`](alpine/php/pecl-extensions.txt); `imagick` is left out on 8.6 until it supports that version.
 
 ## Security
 
@@ -389,6 +399,7 @@ An unavailable extension fails the build with the package names it tried, and th
 - Mozilla Intermediate TLS cipher configuration
 - HTTP-to-HTTPS redirect targets a configured host rather than reflecting the request `Host` header
 - Base image pins to Alpine digest for supply chain integrity, Alpine repositories fetched over HTTPS
+- PHP is compiled from the php.net tarball, checked against a pinned SHA256 and the release managers' signing keys kept in the repository
 - CI builds every image under a candidate tag, scans it with Trivy, and only promotes it to the public tags when the scan passes
 - SBOM, provenance and VEX attestations on every image, plus a keyless Sigstore signature from the build workflow's identity (`cosign verify`); images are rebuilt weekly so Alpine fixes ship without a code change
 
@@ -400,22 +411,22 @@ See [SECURITY.md](SECURITY.md) for CVE details and VEX attestations.
 cd alpine && ./build.sh
 ```
 
-This builds all 16 images sequentially: base, php (x5 versions), php-nginx (x5 versions), php-nginx-dev (x5 versions).
+This builds all 21 images sequentially: base, php, php-nginx, php-nginx-dev and php-fpm (x5 versions each). PHP is compiled from source, so the first build of each version takes several minutes.
 
 ### Pinned PHP releases
 
-The exact PHP release for each minor version lives in [`alpine/php-versions.txt`](alpine/php-versions.txt). Both `build.sh` and the CI workflow read it, pass the release to the Dockerfiles as `PHP_PATCH_VERSION`, and install every PHP package (core, extensions and php-fpm) with the same version constraint (`php84~8.4.26`). A build fails if Alpine no longer carries that release, rather than silently shipping a different PHP or a mismatched set of extensions.
+The exact PHP release for each minor version lives in [`alpine/php-versions.txt`](alpine/php-versions.txt) as `<minor> <release> <sha256> <tarball URL>`. Both `build.sh` and the CI workflow read it and pass the release, checksum and URL to the php Dockerfile, which downloads the tarball, checks the checksum and the GPG signature against the php.net release managers' keyring ([`alpine/php/php-keyring.asc`](alpine/php/php-keyring.asc)), and compiles the CLI and php-fpm from it. A build fails on any mismatch rather than silently shipping a different PHP.
 
-New releases are picked up automatically. The `php-version-bump` workflow runs every four hours, compares the pins against the Alpine package indexes the images install from (the stable branch and edge, both architectures), and when a newer release is available on both architectures it commits the bump to `main` and dispatches the build workflow. Alpine usually lags php.net by a few days, so a release announced today typically ships within the week, and within four hours of Alpine packaging it.
+New releases are picked up automatically. The `php-version-bump` workflow runs every four hours, compares the pins with php.net's releases feed (and its pre-release feed for a minor without a final release yet), and when a newer release is published it rewrites the line, commits the bump to `main` and dispatches the build workflow. Patch releases of the pinned PECL extensions are applied the same way. A php.net release therefore ships within roughly four hours plus the build.
 
 To check or bump manually:
 
 ```bash
-# Report pinned release vs Alpine vs php.net for each minor
+# Report pinned release vs php.net for each minor, and pinned vs latest PECL releases
 alpine/check-php-versions.sh
-# PHP 8.4: pinned 8.4.26, Alpine 8.4.26, php.net 8.4.27 (security release, waiting on Alpine)
+# PHP 8.4: pinned 8.4.26, php.net 8.4.27 (security release), update available
 
-# Rewrite alpine/php-versions.txt with the newest releases, then push to main
+# Rewrite the pins (release, checksum, URL) with the newest releases, then push to main
 alpine/check-php-versions.sh --update
 ```
 
@@ -428,7 +439,7 @@ alpine/test.sh all 8.4        # every check against the local rollogi/*:8.4 imag
 alpine/test.sh php-nginx rollogi/php-nginx:8.4 8.4.27
 ```
 
-CI runs the same script against every candidate image before it is promoted, so a regression in health checks, extensions, package consistency, hardening or logging blocks the publish.
+CI runs the same script against every candidate image before it is promoted, so a regression in health checks, extensions, the source build, hardening or logging blocks the publish.
 
 ### Build a single image
 
@@ -436,14 +447,16 @@ CI runs the same script against every candidate image before it is promoted, so 
 # Base
 docker build -t rollogi/base:latest ./alpine/base
 
-# PHP 8.4 (omit PHP_PATCH_VERSION to install whatever Alpine currently has)
+# PHP 8.4, compiled from source (PHP_PATCH_VERSION is required; PHP_SOURCE_SHA256 and
+# PHP_SOURCE_URL are optional for a final release, the GPG signature is always checked)
 docker build \
   --build-arg PHP_VERSION=84 \
-  --build-arg PHP_PATCH_VERSION=8.4.26 \
+  --build-arg PHP_PATCH_VERSION=8.4.27 \
+  --build-arg PHP_SOURCE_SHA256=dcf93923b0e38e0d5252b25b796520b5a47761a08b3488b6d0b5d1115764d3f0 \
   -t rollogi/php:8.4 \
   ./alpine/php
 
-# PHP-Nginx 8.4 (php-fpm is pinned to the release baked into the php image)
+# PHP-Nginx 8.4 (php-fpm comes from the php image, built from the same source as the CLI)
 docker build \
   --build-arg PHP_IMAGE_TAG=8.4 \
   --build-arg PHP_VERSION=84 \

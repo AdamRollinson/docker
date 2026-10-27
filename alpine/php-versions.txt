@@ -1,19 +1,20 @@
-# Pinned PHP releases, one per line: <minor> <release>
+# Pinned PHP releases, one per line: <minor> <release> <sha256> <tarball URL>
 #
-# build.sh and .github/workflows/docker-build.yml read this file. The release
-# is passed to the Dockerfiles as PHP_PATCH_VERSION and enforced with an apk
-# version constraint, so a build fails instead of silently installing a
-# different PHP. Images are tagged with both values (php:8.3 and php:8.3.35).
+# build.sh and .github/workflows/docker-build.yml read this file. The php image is
+# compiled from the tarball, which must match the checksum and carry a valid signature
+# from a php.net release manager, so a build fails instead of silently compiling a
+# different PHP. Images are tagged with both the minor and the release (php:8.3 and
+# php:8.3.36).
 #
-# The release must exist in the Alpine repositories the Dockerfiles use: the base
-# image's stable branch (main, community) plus edge main, community and testing
-# (8.2 and pre-release 8.6 only exist in edge/testing). Pre-releases use Alpine's
-# spelling, e.g. 8.6.0_rc3, and are published on a channel tag (php:8.6-rc) plus
-# the exact tag; the bare minor tag (php:8.6) only appears once the final release
-# is pinned. Check what is available with:
+# Final releases come from www.php.net/distributions. Pre-releases come from the
+# release manager's directory on downloads.php.net and keep Alpine's spelling here
+# (8.6.0_rc4 for php.net's 8.6.0RC4); they are published on a channel tag (php:8.6-rc)
+# plus the exact tag, and the bare minor tag (php:8.6) only appears once the final
+# release is pinned. Check php.net for newer releases, and rewrite the lines with
+# --update:
 #   alpine/check-php-versions.sh
-8.2 8.2.34
-8.3 8.3.36
-8.4 8.4.27
-8.5 8.5.12
-8.6 8.6.0_rc4
+8.2 8.2.35 5737b98601fe5ab1b8c5db0c82ed3158acb9283ed3081ffe2faffb9ac81455e6 https://www.php.net/distributions/php-8.2.35.tar.xz
+8.3 8.3.36 dd54693aa334c5c4d72e9aee96b082c2473750a18a6c1d105789c93a3b1692fd https://www.php.net/distributions/php-8.3.36.tar.xz
+8.4 8.4.27 dcf93923b0e38e0d5252b25b796520b5a47761a08b3488b6d0b5d1115764d3f0 https://www.php.net/distributions/php-8.4.27.tar.xz
+8.5 8.5.12 08bc2eba2a588654ade1357174aa646b761556c862dda0678345ee29ed481209 https://www.php.net/distributions/php-8.5.12.tar.xz
+8.6 8.6.0_rc4 93f208da9ae059bf6863b0e1d101e6c6475a7b0f0acbf6c084950ab522f514d8 https://downloads.php.net/~mbeccati/php-8.6.0RC4.tar.xz

@@ -13,7 +13,7 @@ USER root
 ARG PHP_VERSION
 
 # Set the PHP version as an environment variable.
-# PHP_PATCH_VERSION is inherited from the php image so php-fpm is pinned to the same release.
+# PHP_PATCH_VERSION is inherited from the php image, which also provides php-fpm.
 ENV PHP_VERSION=${PHP_VERSION}
 
 ENV NGINX_PORT=80 \
@@ -56,29 +56,18 @@ ENV NGINX_PORT=80 \
 # is rebuilt whenever Alpine publishes new packages instead of being reused from the cache
 ARG APK_INDEX_HASH=""
 
-# Update, add testing repo, and install PHP and Nginx in a single RUN command
-# Note: apk upgrade with edge repos replaces gettext-envsubst with a Go-based
-# envsubst that strips semicolons after ${VAR} — reinstall gettext-envsubst to fix
+# Nginx from the Alpine release. php-fpm is already in the php image, compiled from the same
+# source as the CLI, so it is checked here rather than installed.
 RUN set -eux; \
-    apk update && apk upgrade; \
+    apk upgrade --no-cache; \
     apk add --no-cache \
-        --repository=https://dl-cdn.alpinelinux.org/alpine/edge/main \
-        --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community \
-        --repository=https://dl-cdn.alpinelinux.org/alpine/edge/testing \
         nginx \
         openssl \
-        php${PHP_VERSION}-fpm${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}} \
         gettext-envsubst; \
-    if [ -n "${PHP_PATCH_VERSION}" ]; then \
-        installed="$(php-fpm${PHP_VERSION} -v | awk 'NR==1 {print tolower($2)}')"; \
-        expected="$(printf '%s' "${PHP_PATCH_VERSION}" | tr -d '_' | tr 'A-Z' 'a-z')"; \
-        if [ "${installed}" != "${expected}" ]; then \
-            echo "ERROR: pinned PHP-FPM ${PHP_PATCH_VERSION} but ${installed} was installed"; exit 1; \
-        fi; \
-        mismatched="$(apk list -I 2>/dev/null | awk '{print $1}' | grep "^php${PHP_VERSION}" | grep -v -- '-pecl-' | grep -v -- "-${PHP_PATCH_VERSION}-r" || true)"; \
-        if [ -n "${mismatched}" ]; then \
-            echo "ERROR: these php${PHP_VERSION} packages do not match the pinned release ${PHP_PATCH_VERSION}:"; echo "${mismatched}"; exit 1; \
-        fi; \
+    installed="$(php-fpm -v | awk 'NR==1 {print tolower($2)}')"; \
+    expected="$(printf '%s' "${PHP_PATCH_VERSION}" | tr -d '_' | tr 'A-Z' 'a-z')"; \
+    if [ "${installed}" != "${expected}" ]; then \
+        echo "ERROR: php-fpm reports ${installed}, expected ${PHP_PATCH_VERSION}"; exit 1; \
     fi; \
     rm /etc/nginx/http.d/default.conf; \
     mkdir -p /var/log/php-fpm /etc/nginx/after.d /etc/nginx/http-conf.d; \
@@ -96,7 +85,6 @@ COPY app.conf.template app-ssl.conf.template app-ssl-redirect.conf.template metr
 COPY index.php /var/www/html/index.php
 COPY php-nginx-entrypoint.sh /usr/local/bin/
 COPY healthcheck.sh /usr/local/bin/
-RUN ln -s /usr/sbin/php-fpm${PHP_VERSION} /usr/sbin/php-fpm
 
 # Make scripts executable
 RUN chmod +x /usr/local/bin/php-nginx-entrypoint.sh /usr/local/bin/healthcheck.sh

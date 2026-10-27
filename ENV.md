@@ -35,9 +35,11 @@ Standard Composer variables with container-friendly defaults: **`COMPOSER_HOME`*
 ## `alpine/php/Dockerfile`
 
 ### PHP General Settings
-- **`PHP_VERSION`**: Specifies the PHP version to be installed. Default is `83`.
-- **`PHP_PATCH_VERSION`**: Build argument (also exported as an environment variable) pinning the exact PHP release installed, e.g. `8.3.35`. Set from `alpine/php-versions.txt` by the build script and CI.
-- **`PHPRC`**: Set to `/run/php`, where the entrypoint renders `php.ini`. Configuration under `/etc/php*` remains root-owned.
+- **`PHP_VERSION`**: The PHP minor without the dot, e.g. `83`. Used for the Alpine-era command names (`php83`, `php-fpm83`, symlinks to the compiled binaries) and log directories.
+- **`PHP_PATCH_VERSION`**: Build argument (also exported as an environment variable) naming the exact PHP release compiled into the image, e.g. `8.3.36`. Required. Set from `alpine/php-versions.txt` by the build script and CI.
+- **`PHP_SOURCE_URL`** / **`PHP_SOURCE_SHA256`**: Build arguments for the tarball location and checksum, from `alpine/php-versions.txt`. The URL defaults to `www.php.net/distributions` (final releases only); the checksum is optional, the GPG signature is always checked.
+- **`PHP_EXTRA_EXTENSIONS`** / **`PHP_EXTRA_BUILD_DEPS`**: Build arguments for extra extensions (bundled ones compiled from the PHP source, others from the latest stable PECL release) and any `-dev` packages they need beyond the built-in list.
+- **`PHPRC`**: Set to `/run/php`, where the entrypoint renders `php.ini`. The compiled-in configuration under `/usr/local/etc/php` (including the `conf.d` scan directory) remains root-owned.
 - **`PHP_EXPOSE_PHP`**: Controls the `X-Powered-By` header. Default is `Off`.
 - **`PHP_SESSION_COOKIE_SECURE`**: Adds the `Secure` flag to session cookies. Empty by default, which resolves to `Off` in the CLI image and to `On` in php-nginx when `NGINX_SSL_ENABLED=true`.
 - **`PHP_SENDMAIL_PATH`**: Sets `sendmail_path`. Empty by default, which keeps PHP's built-in default. Use `/usr/bin/msmtp -t` or similar when a mail relay binary is installed.

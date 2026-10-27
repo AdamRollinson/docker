@@ -1,108 +1,40 @@
 #!/bin/bash
 
-# Compare the pinned PHP releases in php-versions.txt with what Alpine currently
-# ships, for both amd64 and arm64. With --update, rewrite the file so each minor
-# points at the newest release available on both architectures.
+# Compare the pinned PHP releases in php-versions.txt with what php.net publishes. With
+# --update, rewrite each line that is behind to the newest release, with its checksum and
+# tarball URL, so the build compiles exactly what was checked here.
 #
-# The Dockerfiles install from the base image's stable release repositories plus
-# edge main, community and testing, and apk picks the newest version it can see
-# across all of them. A security release can land in the stable branch before edge
-# (or the other way round), so the same set of repositories is consulted here.
+# A minor with a final release follows php.net's releases feed; a minor without one yet (the
+# next PHP, during its alphas and release candidates) follows the pre-release feed, which also
+# gives the release manager's download path. A final release always beats a pre-release, so a
+# pin moves from 8.6.0_rc4 to 8.6.0 on its own. Pins keep Alpine's spelling (8.6.0_rc4) for
+# the image tags; php.net spells the same release 8.6.0RC4.
 #
-# Each line also shows the latest upstream release from php.net, so a security
-# fix that Alpine has not packaged yet is visible. Upstream never drives the
-# bump: pinning a release apk cannot install only breaks the build.
-# Set CHECK_UPSTREAM=false to skip the php.net lookup (offline use).
+# The PECL extensions in php/pecl-extensions.txt are checked as well: --update applies newer
+# releases within the same major.minor, anything larger is only reported.
 
 set -euo pipefail
 
-VERSIONS_FILE="$(dirname "$0")/php-versions.txt"
-ARCHES=(x86_64 aarch64)
-
-# Alpine release branch of the base image, read from its FROM line (alpine:3.24 -> v3.24)
-ALPINE_RELEASE="${ALPINE_RELEASE:-v$(grep -oE '^FROM alpine:[0-9]+\.[0-9]+' "$(dirname "$0")/base/Dockerfile" | sed 's/^FROM alpine://')}"
-# Repositories as "<branch>/<repo>", in the order apk sees them in the Dockerfiles
-REPOS=("${ALPINE_RELEASE}/main" "${ALPINE_RELEASE}/community" edge/main edge/community edge/testing)
+DIR="$(dirname "$0")"
+VERSIONS_FILE="$DIR/php-versions.txt"
+PECL_FILE="$DIR/php/pecl-extensions.txt"
 UPDATE=false
 [ "${1:-}" = "--update" ] && UPDATE=true
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-# Print the newest upstream version (without the Alpine -rN suffix) of a package across
-# every repository apk would consult, for one architecture. Prints nothing if absent
-# everywhere. An index can list several versions while a release rolls out, so every
-# candidate is considered and the newest wins, exactly as apk resolves it.
-edge_version() {
-    local pkg=$1 arch=$2 repo index candidate best=""
-    for repo in "${REPOS[@]}"; do
-        index="$TMP/${repo//\//-}-$arch"
-        if [ ! -f "$index" ]; then
-            curl -sSfL "https://dl-cdn.alpinelinux.org/alpine/$repo/$arch/APKINDEX.tar.gz" \
-                | tar -xzOf - APKINDEX > "$index" 2>/dev/null || : > "$index"
-        fi
-        while IFS= read -r candidate; do
-            candidate="${candidate%-r*}"
-            if [ -z "$best" ] || is_newer "$candidate" "$best"; then
-                best="$candidate"
-            fi
-        done < <(awk -v p="$pkg" '
-            BEGIN { RS = ""; FS = "\n" }
-            {
-                name = ""; ver = ""
-                for (i = 1; i <= NF; i++) {
-                    if ($i ~ /^P:/) name = substr($i, 3)
-                    if ($i ~ /^V:/) ver = substr($i, 3)
-                }
-                if (name == p) print ver
-            }' "$index")
-    done
-    [ -n "$best" ] && echo "$best"
+# php.net spelling to Alpine spelling: 8.6.0RC4 -> 8.6.0_rc4, 8.6.0alpha1 -> 8.6.0_alpha1
+alpine_spelling() {
+    printf '%s' "$1" | tr 'A-Z' 'a-z' | sed -E 's/([0-9])(rc|beta|alpha)/\1_\2/'
 }
 
-# Latest upstream release for a minor from php.net, printed as "<version>|<tags>"
-# in Alpine's spelling (8.6.0RC3 -> 8.6.0_rc3). Prints nothing when the branch is
-# not released yet or php.net cannot be reached.
-upstream_release() {
-    local minor=$1 json version tags
-    [ "${CHECK_UPSTREAM:-true}" = "true" ] || return 0
-    json=$(curl -sSf --max-time 10 "https://www.php.net/releases/index.php?json&version=${minor}" 2>/dev/null) || { echo "unavailable"; return 0; }
-    case "$json" in *'"error"'*) return 0 ;; esac
-    version=$(printf '%s' "$json" | grep -oE 'php-[0-9]+\.[0-9]+\.[0-9]+[A-Za-z0-9]*\.tar' | head -n1 \
-        | sed -E 's/^php-//; s/\.tar$//' | tr 'A-Z' 'a-z' | sed -E 's/([0-9])(rc|beta|alpha)/\1_\2/')
-    tags=$(printf '%s' "$json" | grep -oE '"tags":\[[^]]*\]' | head -n1 | sed -E 's/"tags":\[//; s/\]//; s/"//g')
-    [ -n "$version" ] && printf '%s|%s\n' "$version" "$tags"
-}
-
-# Human-readable php.net column for one minor, given the release Alpine edge has
-upstream_note() {
-    local minor=$1 edge=$2 upstream version tags
-    upstream=$(upstream_release "$minor")
-    if [ "$upstream" = "unavailable" ]; then
-        echo ", php.net: lookup failed"
-        return 0
-    fi
-    if [ -z "$upstream" ]; then
-        [ "${CHECK_UPSTREAM:-true}" = "true" ] && echo ", php.net: no stable release yet"
-        return 0
-    fi
-    version="${upstream%%|*}"
-    tags="${upstream#*|}"
-    if [ -n "$edge" ] && is_newer "$version" "$edge"; then
-        pending=$((pending + 1))
-        case ",$tags," in
-            *,security,*) echo ", php.net $version (security release, waiting on Alpine)" ;;
-            *)            echo ", php.net $version (waiting on Alpine)" ;;
-        esac
-    else
-        echo ", php.net $version"
-    fi
-}
-
-# True when $1 is a strictly newer version than $2. Alpine spells pre-releases with an
-# underscore (8.6.0_rc3); a final release always beats a pre-release of the same base.
+# True when $1 is a strictly newer version than $2 (either spelling); a final release always
+# beats a pre-release of the same base
 is_newer() {
-    local a="$1" b="$2" a_base="${1%%_*}" b_base="${2%%_*}" a_pre="" b_pre=""
+    local a b a_base b_base a_pre="" b_pre=""
+    a=$(alpine_spelling "$1"); b=$(alpine_spelling "$2")
+    a_base="${a%%_*}"; b_base="${b%%_*}"
     [ "$a" != "$b" ] || return 1
     case "$a" in *_*) a_pre="${a#*_}" ;; esac
     case "$b" in *_*) b_pre="${b#*_}" ;; esac
@@ -115,58 +47,107 @@ is_newer() {
     [ "$(printf '%s\n%s\n' "$a_pre" "$b_pre" | sort -V | tail -n1)" = "$a_pre" ]
 }
 
+sha256() {
+    if command -v sha256sum >/dev/null; then sha256sum | cut -d' ' -f1; else shasum -a 256 | cut -d' ' -f1; fi
+}
+
+# Newest release of a minor as "<version> <sha256> <url> <tags>" (version in Alpine spelling,
+# tags comma-separated, "-" when none), or nothing when php.net has nothing for it
+latest_release() {
+    local minor=$1 json
+    json=$(curl -sSf --max-time 20 "https://www.php.net/releases/index.php?json&version=${minor}") || return 1
+    if ! printf '%s' "$json" | jq -e 'has("error")' >/dev/null; then
+        printf '%s' "$json" | jq -r '
+            (.source[] | select(.filename | endswith(".tar.xz"))) as $f
+            | [.version, $f.sha256, "https://www.php.net/distributions/" + $f.filename,
+               ((.tags // []) | if length == 0 then "-" else join(",") end)] | join(" ")'
+        return
+    fi
+    [ -f "$TMP/pre-release.json" ] \
+        || curl -sSfL --max-time 20 "https://www.php.net/pre-release-builds.php?format=json" > "$TMP/pre-release.json" \
+        || return 1
+    jq -r --arg m "$minor." '
+        to_entries[] | select(.key | startswith($m)) | .value.release
+        | select(.version != null and (.enabled // true) and .files.xz.path != null)
+        | [.version, .files.xz.sha256, .files.xz.path, "pre-release"] | join(" ")' "$TMP/pre-release.json" \
+        | head -n1
+}
+
 updates=0
 skipped=0
-pending=0
-while read -r minor pinned; do
-    pkg="php${minor//./}"
-    amd64=$(edge_version "$pkg" x86_64)
-    arm64=$(edge_version "$pkg" aarch64)
-    note=$(upstream_note "$minor" "$amd64")
-    case "$note" in *"waiting on Alpine"*) pending=$((pending + 1)) ;; esac
-
-    if [ -z "$amd64" ] || [ -z "$arm64" ]; then
-        echo "PHP $minor: pinned $pinned, $pkg missing from Alpine (amd64='$amd64' arm64='$arm64')${note}, skipping"
+while read -r minor pinned pinned_sha pinned_url; do
+    latest=$(latest_release "$minor") || latest="unavailable"
+    if [ "$latest" = "unavailable" ] || [ -z "$latest" ]; then
+        echo "PHP $minor: pinned $pinned, php.net has no release for it (${latest:-none}), skipping"
         skipped=$((skipped + 1))
         continue
     fi
-    if [ "$amd64" != "$arm64" ]; then
-        echo "PHP $minor: pinned $pinned, Alpine architectures disagree (amd64=$amd64 arm64=$arm64)${note}, skipping"
-        skipped=$((skipped + 1))
-        continue
-    fi
+    read -r version sha url tags <<< "$latest"
+    version=$(alpine_spelling "$version")
     channel=""
     case "$pinned" in *_*) channel=" [pre-release channel, tag ${minor}-$(printf '%s' "${pinned#*_}" | tr -d '0-9')]" ;; esac
-    if [ "$amd64" = "$pinned" ]; then
-        echo "PHP $minor: pinned $pinned, Alpine $amd64${note}${channel}"
-        continue
-    fi
-    if ! is_newer "$amd64" "$pinned"; then
-        echo "PHP $minor: pinned $pinned, Alpine has older $amd64 (pin is ahead of edge, build will fail)${note}, skipping"
+    security=""
+    case ",$tags," in *,security,*) security=" (security release)" ;; esac
+
+    if [ "$version" = "$pinned" ]; then
+        if [ "$sha" != "${pinned_sha:-}" ] || [ "$url" != "${pinned_url:-}" ]; then
+            echo "PHP $minor: pinned $pinned, but its checksum or URL differs from php.net${channel}, update available"
+        else
+            echo "PHP $minor: pinned $pinned, php.net $version${channel}"
+            continue
+        fi
+    elif ! is_newer "$version" "$pinned"; then
+        echo "PHP $minor: pinned $pinned, php.net has older $version (pin is ahead), skipping"
         skipped=$((skipped + 1))
         continue
+    else
+        echo "PHP $minor: pinned $pinned, php.net $version${security}${channel}, update available"
     fi
 
-    echo "PHP $minor: pinned $pinned, Alpine $amd64${note}${channel}, update available"
     updates=$((updates + 1))
     if $UPDATE; then
-        sed -i.bak "s/^${minor//./\\.} ${pinned//./\\.}\$/$minor $amd64/" "$VERSIONS_FILE"
-        rm -f "$VERSIONS_FILE.bak"
-        echo "PHP $minor: updated to $amd64"
-        case "$pinned:$amd64" in
+        awk -v m="$minor" -v line="$minor $version $sha $url" '$1 == m && $0 !~ /^[[:space:]]*#/ { print line; next } { print }' \
+            "$VERSIONS_FILE" > "$TMP/versions" && cat "$TMP/versions" > "$VERSIONS_FILE"
+        echo "PHP $minor: updated to $version"
+        case "$pinned:$version" in
             *_*:*_*) ;;
             *_*:*) echo "PHP $minor: final release, the bare ${minor} tag will be published from this build and the pre-release channel tag stops moving" ;;
         esac
     fi
 done < <(grep -Ev '^[[:space:]]*(#|$)' "$VERSIONS_FILE")
 
+# PECL: one stable-release lookup per extension, compared with every pinned line for it
+pecl_updates=0
+while read -r image name source pinned_sha minors; do
+    case "$source" in https://*) continue ;; esac
+    stable=$(curl -sSf --max-time 20 "https://pecl.php.net/rest/r/${name}/stable.txt" 2>/dev/null) || {
+        echo "PECL $name: lookup failed"; continue; }
+    if ! is_newer "$stable" "$source"; then
+        echo "PECL $name ($minors): pinned $source, latest stable $stable"
+        continue
+    fi
+    if [ "${stable%.*}" != "${source%.*}" ]; then
+        echo "PECL $name ($minors): pinned $source, latest stable $stable is a new major or minor, update by hand"
+        continue
+    fi
+    echo "PECL $name ($minors): pinned $source, latest stable $stable, update available"
+    pecl_updates=$((pecl_updates + 1))
+    if $UPDATE; then
+        new_sha=$(curl -sSfL "https://pecl.php.net/get/${name}-${stable}.tgz" | sha256)
+        awk -v img="$image" -v n="$name" -v old="$source" -v line="$image $name $stable $new_sha $minors" \
+            '$1 == img && $2 == n && $3 == old { print line; next } { print }' "$PECL_FILE" > "$TMP/pecl" \
+            && cat "$TMP/pecl" > "$PECL_FILE"
+        echo "PECL $name: updated to $stable"
+    fi
+done < <(grep -Ev '^[[:space:]]*(#|$)' "$PECL_FILE")
+
 if [ "$updates" -eq 0 ] && [ "$skipped" -eq 0 ]; then
-    echo "All pinned PHP releases match Alpine"
+    echo "All pinned PHP releases match php.net"
 elif [ "$updates" -eq 0 ]; then
-    echo "$skipped pin(s) could not be reconciled with Alpine, see above"
+    echo "$skipped pin(s) could not be reconciled with php.net, see above"
 elif ! $UPDATE; then
-    echo "$updates update(s) available, run with --update to apply"
+    echo "$updates PHP update(s) available, run with --update to apply"
 fi
-if [ "$pending" -gt 0 ]; then
-    echo "$pending upstream php.net release(s) not yet packaged in Alpine; the pins will follow once they are"
+if [ "$pecl_updates" -gt 0 ] && ! $UPDATE; then
+    echo "$pecl_updates PECL update(s) available, run with --update to apply"
 fi
