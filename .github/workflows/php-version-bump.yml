@@ -1,9 +1,10 @@
 name: Bump Pinned PHP Versions
 
-# Checks Alpine edge every four hours for newer PHP releases. When one has landed for every
-# architecture we build, the pin in alpine/php-versions.txt is updated, the change is recorded
-# on the documentation changelog, both are committed to main and the Docker build workflow is
-# dispatched so the new images are built and pushed without manual intervention.
+# Checks php.net every four hours for newer PHP releases (and PECL for patch releases of the
+# extensions in alpine/php/pecl-extensions.txt). When one appears, the pin with its checksum
+# and tarball URL is updated in alpine/php-versions.txt, the change is recorded on the
+# documentation changelog, both are committed to main and the Docker build workflow is
+# dispatched so the new images are compiled and pushed without manual intervention.
 
 on:
   schedule:
@@ -25,7 +26,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Compare pinned releases with Alpine edge
+      - name: Compare pinned releases with php.net and PECL
         run: alpine/check-php-versions.sh --update
 
       - name: Record the change on the docs changelog
@@ -37,11 +38,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if git diff --quiet alpine/php-versions.txt; then
+          if git diff --quiet alpine/php-versions.txt alpine/php/pecl-extensions.txt; then
             echo "Nothing to bump"
             exit 0
           fi
-          releases=$(git diff -U0 alpine/php-versions.txt | awk '/^\+[0-9]/ { print $2 }' | paste -sd, - | sed 's/,/, /g')
+          releases=$( { git diff -U0 alpine/php-versions.txt | awk '/^\+[0-9]/ { print $2 }'
+                        git diff -U0 alpine/php/pecl-extensions.txt | awk '/^\+[a-z]/ { print $2 " " $3 }'; } \
+                      | paste -sd, - | sed 's/,/, /g')
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "Bump pinned PHP releases to ${releases}"
@@ -57,5 +60,5 @@ jobs:
           NOTIFY_WEBHOOK_URL: ${{ secrets.NOTIFY_WEBHOOK_URL }}
         run: |
           alpine/notify.sh info "PHP pins bumped to ${{ steps.bump.outputs.releases }}" \
-            "Alpine now ships these releases; the image build has been dispatched and will notify again when it publishes." \
+            "php.net or PECL published these releases; the image build has been dispatched and will notify again when it publishes." \
             "${{ github.server_url }}/${{ github.repository }}/actions/workflows/docker-build.yml"

@@ -113,11 +113,16 @@ test_php() {
     warnings=$(docker run --rm "$img" php -r 'echo 1;' 2>&1 | grep -c "Warning" || true)
     [ "$warnings" = "0" ] && pass "no startup warnings" || fail "$warnings startup warning(s)" "$(docker run --rm "$img" php -r 'echo 1;' 2>&1 | head -5)"
     local missing
-    missing=$(docker run --rm "$img" php -r 'foreach (["curl","mbstring","intl","pdo_mysql","mysqli","gd","zip","soap","redis","openssl","sockets","sodium","pgsql","pdo_pgsql","sqlite3","pdo_sqlite","apcu","igbinary","Zend OPcache"] as $e) if (!extension_loaded($e)) echo $e, " ";')
+    missing=$(docker run --rm "$img" php -r 'foreach (["curl","mbstring","intl","pdo_mysql","mysqli","gd","zip","soap","redis","openssl","sockets","sodium","pgsql","pdo_pgsql","sqlite3","pdo_sqlite","apcu","igbinary","msgpack","readline","Zend OPcache"] as $e) if (!extension_loaded($e)) echo $e, " ";')
     [ -z "$missing" ] && pass "required extensions loaded" || fail "extensions missing: $missing"
-    local mismatched
-    mismatched=$(docker run --rm --entrypoint sh "$img" -c 'apk list -I 2>/dev/null | awk "{print \$1}" | grep "^php" | grep -v -- "-pecl-" | grep -v -- "-$(php -r "echo PHP_VERSION;" | tr "A-Z" "a-z" | sed -E "s/([0-9])(rc|beta|alpha)/\1_\2/")-r" || true')
-    [ -z "$mismatched" ] && pass "every php package at the same release" || fail "mismatched php packages" "$mismatched"
+    local packaged
+    packaged=$(docker run --rm --entrypoint sh "$img" -c 'apk list -I 2>/dev/null | awk "{print \$1}" | grep -E "^php[0-9]" || true')
+    [ -z "$packaged" ] && pass "no Alpine php packages installed (PHP is compiled from source)" || fail "Alpine php packages installed" "$packaged"
+    local fpm
+    fpm=$(docker run --rm --entrypoint sh "$img" -c 'php-fpm -v | awk "NR==1 {print tolower(\$2)}"' 2>/dev/null)
+    [ "$fpm" = "$expected" ] && pass "php-fpm built from the same source ($2)" || fail "php-fpm reports '$fpm', expected '$expected'"
+    docker run --rm --entrypoint sh "$img" -c 'test -x /usr/local/bin/phpize && test -x /usr/local/bin/php-config && test -d "$(php-config --include-dir)" && command -v php-ext-install >/dev/null' \
+        && pass "phpize, headers and php-ext-install present for building extensions" || fail "extension build tooling missing"
     docker run --rm "$img" composer --version >/dev/null 2>&1 && pass "composer runs" || fail "composer does not run"
     docker run --rm --user 4321:4321 "$img" composer --version >/dev/null 2>&1 && pass "composer runs as an arbitrary --user (COMPOSER_HOME under /tmp)" || fail "composer fails for --user 4321" "$(docker run --rm --user 4321:4321 "$img" composer --version 2>&1 | tail -3)"
     docker run --rm --user 0 "$img" composer --version 2>&1 | grep -qi "superuser" && fail "composer warns about running as root in root mode" || pass "composer silent about root in root mode"
@@ -219,7 +224,7 @@ test_php_nginx() {
     local untagged
     untagged=$(docker logs "$cid" 2>&1 | grep -cvE '^\[(entrypoint|nginx|php-fpm)\]' || true)
     [ "$untagged" = "0" ] && pass "all log lines tagged by service" || fail "$untagged untagged log line(s)" "$(docker logs "$cid" 2>&1 | grep -vE '^\[(entrypoint|nginx|php-fpm)\]' | head -3)"
-    docker exec "$cid" sh -c '! test -w /etc/nginx/nginx.conf && ! test -w /etc/php*/php.ini' \
+    docker exec "$cid" sh -c '! test -w /etc/nginx/nginx.conf && ! test -w /usr/local/etc/php/conf.d' \
         && pass "/etc config not writable by runtime user" || fail "/etc config writable by runtime user"
     docker rm -f "$cid" >/dev/null
 
@@ -353,7 +358,7 @@ test_php_fpm() {
     local untagged
     untagged=$(docker logs "$cid" 2>&1 | grep -cvE '^\[(entrypoint|install|php-fpm)\]' || true)
     [ "$untagged" = "0" ] && pass "all log lines tagged by service" || fail "$untagged untagged log line(s)" "$(docker logs "$cid" 2>&1 | grep -vE '^\[(entrypoint|install|php-fpm)\]' | head -3)"
-    docker exec "$cid" sh -c '! test -w /etc/php*/php.ini && ! test -w /usr/local/etc/php/www.conf.template' \
+    docker exec "$cid" sh -c '! test -w /usr/local/etc/php/conf.d && ! test -w /usr/local/etc/php/www.conf.template' \
         && pass "/etc and template config not writable by runtime user" || fail "config writable by runtime user"
     docker rm -f "$cid" >/dev/null
 

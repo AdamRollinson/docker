@@ -8,8 +8,8 @@ FROM ${PHP_IMAGE}
 # Switch to root for package installation
 USER root
 
-# PHP minor without dots, used in Alpine package names (e.g. 84). PHP_PATCH_VERSION is inherited
-# from the php image so php-fpm is pinned to the same release.
+# PHP minor without dots (e.g. 84). PHP_PATCH_VERSION is inherited from the php image, which
+# also provides php-fpm.
 ARG PHP_VERSION
 ENV PHP_VERSION=${PHP_VERSION}
 
@@ -28,26 +28,20 @@ ENV PHP_FPM_LISTEN=0.0.0.0:9000 \
     PHP_FPM_SLOWLOG="" \
     APP_INSTALL_DIR=/var/www/html
 
-# php-fpm pinned to the php image's release from the same scoped edge repositories, then
-# cgi-fcgi from the stable branch for the healthcheck (it speaks FastCGI to the pool's ping path)
+# Set by CI to a hash of the Alpine package indexes (alpine/apk-index-hash.sh) so this layer
+# is rebuilt whenever Alpine publishes new packages instead of being reused from the cache
+ARG APK_INDEX_HASH=""
+
+# php-fpm is already in the php image, compiled from the same source as the CLI, so it is only
+# checked here; cgi-fcgi comes from the Alpine release for the healthcheck (it speaks FastCGI
+# to the pool's ping path)
 RUN set -eux; \
-    apk update && apk upgrade; \
-    apk add --no-cache \
-        --repository=https://dl-cdn.alpinelinux.org/alpine/edge/main \
-        --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community \
-        --repository=https://dl-cdn.alpinelinux.org/alpine/edge/testing \
-        php${PHP_VERSION}-fpm${PHP_PATCH_VERSION:+~${PHP_PATCH_VERSION}}; \
+    apk upgrade --no-cache; \
     apk add --no-cache fcgi; \
-    if [ -n "${PHP_PATCH_VERSION}" ]; then \
-        installed="$(php-fpm${PHP_VERSION} -v | awk 'NR==1 {print tolower($2)}')"; \
-        expected="$(printf '%s' "${PHP_PATCH_VERSION}" | tr -d '_' | tr 'A-Z' 'a-z')"; \
-        if [ "${installed}" != "${expected}" ]; then \
-            echo "ERROR: pinned PHP-FPM ${PHP_PATCH_VERSION} but ${installed} was installed"; exit 1; \
-        fi; \
-        mismatched="$(apk list -I 2>/dev/null | awk '{print $1}' | grep "^php${PHP_VERSION}" | grep -v -- '-pecl-' | grep -v -- "-${PHP_PATCH_VERSION}-r" || true)"; \
-        if [ -n "${mismatched}" ]; then \
-            echo "ERROR: these php${PHP_VERSION} packages do not match the pinned release ${PHP_PATCH_VERSION}:"; echo "${mismatched}"; exit 1; \
-        fi; \
+    installed="$(php-fpm -v | awk 'NR==1 {print tolower($2)}')"; \
+    expected="$(printf '%s' "${PHP_PATCH_VERSION}" | tr -d '_' | tr 'A-Z' 'a-z')"; \
+    if [ "${installed}" != "${expected}" ]; then \
+        echo "ERROR: php-fpm reports ${installed}, expected ${PHP_PATCH_VERSION}"; exit 1; \
     fi; \
     find / -xdev -type f -perm /6000 -exec chmod a-s {} +
 
@@ -59,8 +53,7 @@ LABEL org.opencontainers.image.title="rollogi/php-fpm" \
       org.opencontainers.image.licenses="MIT"
 
 COPY php-fpm-entrypoint.sh php-fpm-healthcheck /usr/local/bin/
-RUN chmod +x /usr/local/bin/php-fpm-entrypoint.sh /usr/local/bin/php-fpm-healthcheck && \
-    ln -s /usr/sbin/php-fpm${PHP_VERSION} /usr/sbin/php-fpm
+RUN chmod +x /usr/local/bin/php-fpm-entrypoint.sh /usr/local/bin/php-fpm-healthcheck
 
 # Runtime state directories are sticky and world-writable so any --user can render config and
 # write logs; /etc stays root-owned

@@ -1,0 +1,73 @@
+#!/bin/bash
+# Build and install a PHP extension against the PHP in this image.
+#
+#   php-ext-install [--no-enable] <name> [<version>|<url> [<sha256>]] [-- <configure options>]
+#
+# A bundled extension (ext/<name> in the PHP source tree) is built from /usr/src/php when no
+# version is given and the source is present, as it is in the php image's build stage. Anything
+# else comes from PECL (the given version or the latest stable release) or from an https:// URL
+# for releases PECL does not carry, such as Xdebug alphas. The archive is checked against
+# <sha256> when one is given. Unless --no-enable is passed, an ini file in the scan directory
+# loads the extension.
+#
+# Needs a toolchain and the extension's -dev packages, e.g. in a derived image:
+#   RUN apk add --no-cache --virtual .build autoconf file g++ gcc make musl-dev linux-headers \
+#       && php-ext-install mongodb && apk del .build
+
+set -euo pipefail
+
+usage() {
+    sed -n '4p' "$0" | sed 's/^#   /usage: /' >&2
+    exit 2
+}
+
+enable=true
+if [ "${1:-}" = "--no-enable" ]; then
+    enable=false
+    shift
+fi
+[ $# -gt 0 ] || usage
+name=$1; shift
+version=""
+sha256=""
+if [ $# -gt 0 ] && [ "$1" != "--" ]; then version=$1; shift; fi
+if [ $# -gt 0 ] && [ "$1" != "--" ]; then sha256=$1; shift; fi
+if [ "${1:-}" = "--" ]; then shift; fi
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+if [ -z "$version" ] && [ -d "/usr/src/php/ext/${name}" ]; then
+    echo "php-ext-install: building bundled extension ${name}"
+    cp -r "/usr/src/php/ext/${name}" "$work/src"
+else
+    case "$version" in
+        https://*) url=$version ;;
+        "")        url="https://pecl.php.net/get/${name}-$(curl -fsSL "https://pecl.php.net/rest/r/${name}/stable.txt").tgz" ;;
+        *)         url="https://pecl.php.net/get/${name}-${version}.tgz" ;;
+    esac
+    echo "php-ext-install: building ${name} from ${url}"
+    curl -fsSL -o "$work/ext.tgz" "$url"
+    if [ -n "$sha256" ]; then
+        echo "${sha256}  ${work}/ext.tgz" | sha256sum -c -
+    fi
+    mkdir "$work/src"
+    tar -xzf "$work/ext.tgz" -C "$work/src" --strip-components=1
+fi
+
+cd "$work/src"
+phpize
+./configure --with-php-config=/usr/local/bin/php-config "$@"
+make -j"$(nproc)"
+make install
+
+so="$(php-config --extension-dir)/${name}.so"
+[ -f "$so" ] || { echo "php-ext-install: ${so} was not installed" >&2; exit 1; }
+strip --strip-all "$so" 2>/dev/null || true
+
+if $enable; then
+    directive=extension
+    case "$name" in opcache|xdebug) directive=zend_extension ;; esac
+    mkdir -p /usr/local/etc/php/conf.d
+    printf '%s=%s\n' "$directive" "$name" > "/usr/local/etc/php/conf.d/20-${name}.ini"
+fi
