@@ -19,9 +19,12 @@ updates:
     patterns: ["*"]
     multi-ecosystem-group: dependencies
 
-  # Keeps the digest-pinned alpine base image current
+  # Keeps the digest-pinned alpine image current. alpine/base and the php-slim stage in
+  # alpine/php pin the same digest, so both move together in the grouped weekly PR.
   - package-ecosystem: docker
-    directory: /alpine/base
+    directories:
+      - /alpine/base
+      - /alpine/php
     patterns: ["*"]
     multi-ecosystem-group: dependencies
 

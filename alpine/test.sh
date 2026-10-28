@@ -9,6 +9,7 @@
 #   alpine/test.sh php-nginx-dev IMAGE EXPECTED_PHP_VERSION
 #   alpine/test.sh php-fpm       IMAGE EXPECTED_PHP_VERSION
 #   alpine/test.sh php-dev       IMAGE EXPECTED_PHP_VERSION
+#   alpine/test.sh php-slim      IMAGE EXPECTED_PHP_VERSION [FULL_PHP_IMAGE]
 #   alpine/test.sh all           MINOR            # local images rollogi/*:MINOR (or *:MINOR-rc for a pre-release), version from php-versions.txt
 #
 # Exits non-zero on the first failing check. Needs docker and curl.
@@ -454,6 +455,67 @@ test_php_fpm() {
     [ "$out" = "explicit" ] && pass "an explicit command runs instead of php-fpm" || fail "explicit command output unexpected: '$out'"
 }
 
+test_php_slim() { # IMAGE EXPECTED_PHP_VERSION [FULL_PHP_IMAGE to compare extensions with]
+    local img=$1 expected; expected=$(normalise "$2")
+    local ref=${3:-}
+    echo "== php-slim: $img (expect $2)"
+    local n
+    n=$(docker run --rm --entrypoint sh "$img" -c 'find / -xdev -type f -perm /6000 2>/dev/null | wc -l | tr -d " "')
+    [ "$n" = "0" ] && pass "no setuid or setgid binaries" || fail "found $n setuid/setgid binaries"
+    local uid
+    uid=$(docker run --rm --entrypoint sh "$img" -c 'id -u')
+    [ "$uid" != "0" ] && pass "default user is unprivileged (uid $uid)" || fail "default user is root"
+    local present
+    # busybox applets (wget, nc) come with Alpine itself; the packages and tools below must not
+    present=$(docker run --rm --entrypoint sh "$img" -c 'apk info -e bash git curl wget nano gcompat shadow gettext-envsubst supercronic msmtp 2>/dev/null; for c in composer phpize php-config php-ext-install run-service gcc python3; do command -v "$c" >/dev/null && echo "$c"; done; true')
+    [ -z "$present" ] && pass "no bash, git, curl, wget, composer, build tooling or service helpers" || fail "unexpected packages or tools present" "$present"
+    local got
+    got=$(docker run --rm "$img" php -r 'echo strtolower(PHP_VERSION);' 2>/dev/null)
+    [ "$got" = "$expected" ] && pass "php reports $2" || fail "php reports '$got', expected '$expected'"
+    local fpm
+    fpm=$(docker run --rm "$img" php-fpm -v 2>/dev/null | awk 'NR==1 {print tolower($2)}')
+    [ "$fpm" = "$expected" ] && pass "php-fpm built from the same source ($2)" || fail "php-fpm reports '$fpm', expected '$expected'"
+    local out
+    out=$(docker run --rm "$img" php -r 'echo 1;' 2>&1)
+    [ "$out" = "1" ] && pass "no startup warnings or entrypoint noise" || fail "unexpected output" "$out"
+    if [ -n "$ref" ]; then
+        local diff_out
+        diff_out=$(diff <(docker run --rm "$ref" php -m) <(docker run --rm "$img" php -m) || true)
+        [ -z "$diff_out" ] && pass "same extensions as $ref" || fail "extensions differ from $ref" "$diff_out"
+    fi
+    local ml
+    ml=$(docker run --rm -e "php.memory_limit=321M" "$img" php -r 'echo ini_get("memory_limit");' 2>/dev/null)
+    [ "$ml" = "321M" ] && pass "php.* override applies (memory_limit=321M)" || fail "php.* override ignored (got '$ml')"
+    docker run --rm --user 4321:4321 "$img" php -r 'echo 1;' >/dev/null 2>&1 && pass "runs as an arbitrary --user" || fail "fails for --user 4321"
+    docker run --rm --read-only --tmpfs /run:mode=1777 --tmpfs /tmp "$img" php -r 'echo 1;' >/dev/null 2>&1 && pass "runs on a read-only root filesystem" || fail "fails with --read-only"
+    local inst
+    inst=$(docker run --rm -e APP_INSTALL='echo prepared in $(pwd)' "$img" php -r 'echo "main";' 2>&1)
+    echo "$inst" | grep -q '^prepared in /app$' && echo "$inst" | grep -q 'main$' && pass "APP_INSTALL runs in /app before the command" || fail "APP_INSTALL output unexpected" "$inst"
+    local st
+    st=$(docker run --rm -e APP_INSTALL='exit 7' "$img" php -r 'echo "main";' 2>/dev/null; echo "exit=$?")
+    [ "$st" = "exit=7" ] && pass "failed APP_INSTALL stops the container with its exit status" || fail "failed APP_INSTALL did not stop the container ('$st')"
+
+    # serve: php-fpm on 0.0.0.0:9000, read-only and as an arbitrary user, checked over FastCGI
+    # locally and from a second container with the image's own healthcheck
+    local net name cid
+    net="slimtest-$$-$RANDOM"; docker network create "$net" >/dev/null; NETWORKS+=("$net")
+    name="slim-$$-$RANDOM"
+    cid=$(docker run -d --rm --network "$net" --name "$name" --read-only --tmpfs /run:mode=1777 --tmpfs /tmp --user 4321:4321 \
+        -e "fpm.pool.pm.max_children=40" "$img" serve); CONTAINERS+=("$cid")
+    local healthy=false
+    for _ in $(seq 1 40); do docker exec "$cid" php-fpm-healthcheck >/dev/null 2>&1 && { healthy=true; break; }; sleep 0.5; done
+    $healthy && pass "serve runs php-fpm and the healthcheck answers (read-only, --user 4321)" || fail "php-fpm did not become healthy" "$(docker logs "$cid" 2>&1 | tail -5)"
+    docker run --rm --network "$net" "$img" php-fpm-healthcheck "${name}:9000" && pass "FastCGI ping answered from another container" || fail "php-fpm not reachable from another container"
+    docker exec "$cid" sh -c 'grep -E "^pm.max_children" /run/php/php-fpm.d/www.conf | tail -1' | grep -q 40 && pass "fpm.pool.* override applied" || fail "fpm.pool.* override ignored"
+    docker exec "$cid" sh -c '! test -w /usr/local/etc/php/conf.d && ! test -w /usr/local/etc/php/www.conf.template' \
+        && pass "config templates not writable by runtime user" || fail "config writable by runtime user"
+    docker rm -f "$cid" >/dev/null
+
+    local size
+    size=$(docker image inspect "$img" --format '{{.Size}}')
+    echo "  info image size $((size / 1024 / 1024)) MiB"
+}
+
 case "${1:-}" in
     base)          test_base "$2" ;;
     php)           test_php "$2" "$3" ;;
@@ -461,6 +523,7 @@ case "${1:-}" in
     php-nginx-dev) test_php_nginx_dev "$2" "$3" ;;
     php-dev)       test_php_dev "$2" "$3" ;;
     php-fpm)       test_php_fpm "$2" "$3" ;;
+    php-slim)      test_php_slim "$2" "$3" "${4:-}" ;;
     all)
         minor="${2:?usage: test.sh all MINOR}"
         version=$(grep -E "^${minor//./\\.} " "$(dirname "$0")/php-versions.txt" | awk '{print $2}')
@@ -473,6 +536,7 @@ case "${1:-}" in
         test_php_nginx_dev "$PREFIX/php-nginx-dev:$tag" "$version"
         test_php_dev "$PREFIX/php-dev:$tag" "$version"
         test_php_fpm "$PREFIX/php-fpm:$tag" "$version"
+        test_php_slim "$PREFIX/php-slim:$tag" "$version" "$PREFIX/php:$tag"
         ;;
     *) sed -n '3,14p' "$0"; exit 2 ;;
 esac

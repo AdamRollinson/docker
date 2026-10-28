@@ -10,6 +10,7 @@ PHP_NGINX_IMAGE="rollogi/php-nginx"
 PHP_NGINX_DEV_IMAGE="rollogi/php-nginx-dev"
 PHP_FPM_IMAGE="rollogi/php-fpm"
 PHP_DEV_IMAGE="rollogi/php-dev"
+PHP_SLIM_IMAGE="rollogi/php-slim"
 PHP_VERSIONS_FILE="$(dirname "$0")/php-versions.txt"
 
 # Read "<minor> <release> <sha256> <url>" lines from php-versions.txt, skipping comments and blank lines
@@ -53,6 +54,21 @@ while read -r version patch sha256 url; do
         --build-arg PHP_EXTRA_BUILD_DEPS="${PHP_EXTRA_BUILD_DEPS:-}" \
         -t "$IMAGE_TAG" \
         -t "$PATCH_TAG" \
+        ./php
+
+    # php-slim: the same build stage (reused from the cache), on plain Alpine
+    echo "🪶 Building PHP-SLIM image: $PHP_SLIM_IMAGE:$CHANNEL ($PHP_SLIM_IMAGE:$patch)"
+    docker build \
+        --target slim \
+        "${BASE_BUILD_ARGS[@]}" \
+        --build-arg PHP_VERSION="$PHP_VERSION_ENV" \
+        --build-arg PHP_PATCH_VERSION="$patch" \
+        --build-arg PHP_SOURCE_SHA256="$sha256" \
+        --build-arg PHP_SOURCE_URL="$url" \
+        --build-arg PHP_EXTRA_EXTENSIONS="${PHP_EXTRA_EXTENSIONS:-}" \
+        --build-arg PHP_EXTRA_BUILD_DEPS="${PHP_EXTRA_BUILD_DEPS:-}" \
+        -t "$PHP_SLIM_IMAGE:$CHANNEL" \
+        -t "$PHP_SLIM_IMAGE:$patch" \
         ./php
 done < <(read_php_versions)
 

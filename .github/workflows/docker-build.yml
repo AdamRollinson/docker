@@ -32,6 +32,7 @@ env:
   PHP_NGINX_DEV_IMAGE: php-nginx-dev
   PHP_FPM_IMAGE: php-fpm
   PHP_DEV_IMAGE: php-dev
+  PHP_SLIM_IMAGE: php-slim
   BUILDX_VERSION: v0.38.1
   # Images are pushed under this tag first, scanned, and only then promoted to their real tags
   CANDIDATE_TAG: candidate-${{ github.sha }}
@@ -317,6 +318,62 @@ jobs:
           provenance: true
           sbom: true
 
+      # ---- PHP-SLIM image (the slim target of the same Dockerfile) -------------
+      # Reads the php scope so the compiled build stage comes from the cache, and writes its own
+      # scope so it never replaces the php image's cache entries
+      - name: Build PHP-SLIM Image (${{ matrix.minor }}, ${{ matrix.arch }}) locally
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          platforms: ${{ matrix.platform }}
+          context: ./alpine/php
+          target: slim
+          cache-from: |
+            type=gha,scope=php-${{ matrix.minor }}-${{ matrix.arch }}
+            type=gha,scope=php-slim-${{ matrix.minor }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=php-slim-${{ matrix.minor }}-${{ matrix.arch }}
+          build-args: |
+            APK_INDEX_HASH=${{ needs.php-matrix.outputs.apk }}
+            PHP_VERSION=${{ env.PHP_VERSION }}
+            PHP_PATCH_VERSION=${{ matrix.patch }}
+            PHP_SOURCE_URL=${{ matrix.url }}
+            PHP_SOURCE_SHA256=${{ matrix.sha256 }}
+          load: true
+          tags: local/${{ env.PHP_SLIM_IMAGE }}
+          provenance: false
+          sbom: false
+
+      - name: Run Trivy vulnerability scanner on PHP-SLIM Image (${{ matrix.minor }}, ${{ matrix.arch }})
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: local/${{ env.PHP_SLIM_IMAGE }}
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
+
+      - name: Smoke test PHP-SLIM Image (${{ matrix.minor }}, ${{ matrix.arch }})
+        run: alpine/test.sh php-slim local/${{ env.PHP_SLIM_IMAGE }} ${{ matrix.patch }} local/${{ env.PHP_IMAGE }}
+
+      - name: Build PHP-SLIM Image (${{ matrix.minor }}, ${{ matrix.arch }}) by digest
+        id: php-slim
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          platforms: ${{ matrix.platform }}
+          context: ./alpine/php
+          target: slim
+          cache-from: |
+            type=gha,scope=php-${{ matrix.minor }}-${{ matrix.arch }}
+            type=gha,scope=php-slim-${{ matrix.minor }}-${{ matrix.arch }}
+          build-args: |
+            APK_INDEX_HASH=${{ needs.php-matrix.outputs.apk }}
+            PHP_VERSION=${{ env.PHP_VERSION }}
+            PHP_PATCH_VERSION=${{ matrix.patch }}
+            PHP_SOURCE_URL=${{ matrix.url }}
+            PHP_SOURCE_SHA256=${{ matrix.sha256 }}
+          outputs: type=image,name=${{ env.DOCKER_REGISTRY }}/${{ env.PHP_SLIM_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          provenance: true
+          sbom: true
+
       # ---- PHP-NGINX image (FROM the php digest above) -------------------------
       - name: Build PHP-NGINX Image (${{ matrix.minor }}, ${{ matrix.arch }}) locally
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -513,7 +570,8 @@ jobs:
                       "${PHP_NGINX_IMAGE} ${{ steps.php-nginx.outputs.digest }}" \
                       "${PHP_NGINX_DEV_IMAGE} ${{ steps.php-nginx-dev.outputs.digest }}" \
                       "${PHP_FPM_IMAGE} ${{ steps.php-fpm.outputs.digest }}" \
-                      "${PHP_DEV_IMAGE} ${{ steps.php-dev.outputs.digest }}"; do
+                      "${PHP_DEV_IMAGE} ${{ steps.php-dev.outputs.digest }}" \
+                      "${PHP_SLIM_IMAGE} ${{ steps.php-slim.outputs.digest }}"; do
             set -- $pair
             touch "${{ runner.temp }}/digests/$1 ${2#sha256:}"
           done
@@ -540,7 +598,7 @@ jobs:
     steps:
       # Every image published for this minor, in dependency order (php before the images on it)
       - name: Select images (${{ matrix.minor }})
-        run: echo "IMAGES=${PHP_IMAGE} ${PHP_NGINX_IMAGE} ${PHP_NGINX_DEV_IMAGE} ${PHP_FPM_IMAGE} ${PHP_DEV_IMAGE}" >> "$GITHUB_ENV"
+        run: echo "IMAGES=${PHP_IMAGE} ${PHP_NGINX_IMAGE} ${PHP_NGINX_DEV_IMAGE} ${PHP_FPM_IMAGE} ${PHP_DEV_IMAGE} ${PHP_SLIM_IMAGE}" >> "$GITHUB_ENV"
 
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -612,6 +670,14 @@ jobs:
         with:
           command: attestation-add
           image: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_DEV_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
+          file: .vex/openvex.json
+          predicate-type: https://openvex.dev/ns/v0.2.0
+
+      - name: Attach VEX attestation to PHP-SLIM Image (${{ matrix.minor }}) candidate
+        uses: docker/scout-action@221e7f4860634eeb1579e3bd7ca232e577bd1864 # v1.26.0
+        with:
+          command: attestation-add
+          image: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_SLIM_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
           file: .vex/openvex.json
           predicate-type: https://openvex.dev/ns/v0.2.0
 

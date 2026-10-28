@@ -131,6 +131,17 @@ All SSL settings are opt-in. When `NGINX_SSL_ENABLED` is `false` (the default), 
 
 PHP-FPM without a web server. Uses the PHP-FPM settings above with `PHP_FPM_LISTEN=0.0.0.0:9000` and `APP_INSTALL_DIR=/var/www/html`; `PHP_SESSION_COOKIE_SECURE` defaults to `Off` because TLS terminates in the web server container.
 
+## `alpine/php/Dockerfile` (`slim` target, `rollogi/php-slim`)
+
+The same PHP on plain Alpine. It reads:
+
+- The PHP General, Security and OPcache settings above, plus `php.*` overrides
+- The PHP-FPM settings above when run with `serve`, with `PHP_FPM_LISTEN=0.0.0.0:9000` and `PHP_FPM_ERROR_LOG`/`PHP_FPM_SLOWLOG` defaulting to `/proc/self/fd/2`, plus `fpm.pool.*` and `fpm.global.*` overrides
+- **`APP_INSTALL`** and **`APP_INSTALL_DIR`** (default: the working directory, `/app`). Output is not tagged.
+- **`APP_UID`** / **`APP_GID`** (build args, default 1000), as in the base image
+
+It ignores the base image's logging variables (`LOG_MODE`, `LOG_FORMAT`, `LOG_TAG`), worker mode (`CLI_*`), cron (`CRON_*`, `CRONTAB_FILE`), the mail relay (`SMTP_*`) and the Composer settings, because those features are not in the image.
+
 ## `alpine/php-nginx-dev/Dockerfile`
 
 Inherits everything from php-nginx and adds:
