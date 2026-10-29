@@ -287,6 +287,10 @@ RUN chmod +x /usr/local/bin/php-entrypoint.sh
 # and php-fpm through render_fpm_config in entrypoint-lib.sh)
 COPY php.ini.template msmtprc.template www.conf.template /usr/local/etc/php/
 
+# Xdebug and PCOV ini templates, rendered by render_debugger in the dev images (php-dev and
+# php-nginx-dev); nothing here loads them
+COPY debug/ /usr/local/etc/php/debug/
+
 # Runtime-rendered config goes to /run/php; /etc/php* stays root-owned. Runtime state
 # directories are sticky and world-writable so any --user can render its config and write logs.
 RUN mkdir -p /run/php && \

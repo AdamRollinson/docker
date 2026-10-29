@@ -139,3 +139,41 @@ render_fpm_config() {
     printf '\ninclude=%s/php-fpm.d/*.conf\n' "${run}" >> "${run}/php-fpm.conf"
     apply_ini_overrides fpm.pool "$pool"
 }
+
+# Development images: load Xdebug or PCOV (or neither) for this container by rendering an ini
+# into /run/php/conf.d, which PHP_INI_SCAN_DIR=:/run/php/conf.d adds to the stock scan directory.
+# PHP_DEBUGGER is xdebug, pcov or none; the two are never loaded together because both hook
+# code coverage. Templates ship in the php image. Shared by php-dev and php-nginx-dev. Every
+# step checks its own result: callers use "render_debugger || exit 1", which disables set -e here.
+render_debugger() {
+    local dir=/run/php/conf.d templates=/usr/local/etc/php/debug debugger="${PHP_DEBUGGER:-none}"
+    case "$debugger" in
+        xdebug|pcov|none) ;;
+        *)
+            log "ERROR: PHP_DEBUGGER must be 'xdebug', 'pcov' or 'none' (got '${debugger}')."
+            return 1
+            ;;
+    esac
+    if ! mkdir -p "$dir" 2>/dev/null || ! rm -f "${dir}/50-xdebug.ini" "${dir}/50-pcov.ini"; then
+        log "ERROR: cannot write ${dir}. On a read-only root filesystem mount /run as a tmpfs the runtime user owns, e.g. --tmpfs /run:uid=$(id -u),gid=$(id -g)."
+        return 1
+    fi
+    if [ "$debugger" = "none" ]; then
+        log "INFO: PHP_DEBUGGER=none, no debugger or coverage driver is loaded."
+        return 0
+    fi
+    if [ ! -f "$(php-config --extension-dir)/${debugger}.so" ]; then
+        log "ERROR: ${debugger} is not built for PHP $(php-config --version) in this image; use PHP_DEBUGGER=xdebug or none."
+        return 1
+    fi
+    if ! envsubst < "${templates}/${debugger}.ini.template" > "${dir}/50-${debugger}.ini"; then
+        log "ERROR: could not render ${dir}/50-${debugger}.ini."
+        return 1
+    fi
+    if [ "$debugger" = "xdebug" ]; then
+        mkdir -p "${XDEBUG_OUTPUT_DIR:-/tmp/xdebug}" 2>/dev/null || true
+        log "INFO: Xdebug enabled (mode=${XDEBUG_MODE}, start_with_request=${XDEBUG_START_WITH_REQUEST}, client=${XDEBUG_CLIENT_HOST}:${XDEBUG_CLIENT_PORT})."
+    else
+        log "INFO: PCOV enabled (directory=${PCOV_DIRECTORY:-auto})."
+    fi
+}

@@ -1,14 +1,15 @@
 #!/bin/bash
 # Build and install a PHP extension against the PHP in this image.
 #
-#   php-ext-install [--no-enable] <name> [<version>|<url> [<sha256>]] [-- <configure options>]
+#   php-ext-install [--no-enable] [--pinned] <name> [<version>|<url> [<sha256>]] [-- <configure options>]
 #
 # A bundled extension (ext/<name> in the PHP source tree) is built from /usr/src/php when no
 # version is given and the source is present, as it is in the php image's build stage. Anything
 # else comes from PECL (the given version or the latest stable release) or from an https:// URL
 # for releases PECL does not carry, such as Xdebug alphas. The archive is checked against
-# <sha256> when one is given. Unless --no-enable is passed, an ini file in the scan directory
-# loads the extension.
+# <sha256> when one is given. --pinned takes the version and checksum from the line for this
+# PHP minor in /usr/local/etc/php/pecl-extensions.txt instead (how the dev images build Xdebug
+# and PCOV). Unless --no-enable is passed, an ini file in the scan directory loads the extension.
 #
 # Needs a toolchain and the extension's -dev packages, e.g. in a derived image:
 #   RUN apk add --no-cache --virtual .build autoconf file g++ gcc make musl-dev linux-headers \
@@ -22,10 +23,14 @@ usage() {
 }
 
 enable=true
-if [ "${1:-}" = "--no-enable" ]; then
-    enable=false
-    shift
-fi
+pinned=false
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --no-enable) enable=false; shift ;;
+        --pinned)    pinned=true; shift ;;
+        *)           break ;;
+    esac
+done
 [ $# -gt 0 ] || usage
 name=$1; shift
 version=""
@@ -33,6 +38,17 @@ sha256=""
 if [ $# -gt 0 ] && [ "$1" != "--" ]; then version=$1; shift; fi
 if [ $# -gt 0 ] && [ "$1" != "--" ]; then sha256=$1; shift; fi
 if [ "${1:-}" = "--" ]; then shift; fi
+
+if $pinned; then
+    minor=$(php -r 'echo PHP_MAJOR_VERSION, ".", PHP_MINOR_VERSION;')
+    read -r version sha256 < <(awk -v n="$name" -v m="$minor" '
+        !/^[[:space:]]*#/ && $2 == n { for (i = 5; i <= NF; i++) if ($i == "*" || $i == m) { print $3, $4; exit } }' \
+        /usr/local/etc/php/pecl-extensions.txt) || true
+    if [ -z "$version" ]; then
+        echo "php-ext-install: /usr/local/etc/php/pecl-extensions.txt has no ${name} line for PHP ${minor}" >&2
+        exit 1
+    fi
+fi
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT

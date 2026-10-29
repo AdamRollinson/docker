@@ -8,6 +8,7 @@
 #   alpine/test.sh php-nginx     IMAGE EXPECTED_PHP_VERSION
 #   alpine/test.sh php-nginx-dev IMAGE EXPECTED_PHP_VERSION
 #   alpine/test.sh php-fpm       IMAGE EXPECTED_PHP_VERSION
+#   alpine/test.sh php-dev       IMAGE EXPECTED_PHP_VERSION
 #   alpine/test.sh all           MINOR            # local images rollogi/*:MINOR (or *:MINOR-rc for a pre-release), version from php-versions.txt
 #
 # Exits non-zero on the first failing check. Needs docker and curl.
@@ -321,6 +322,66 @@ test_php_nginx_dev() {
     body=$(curl -s "http://127.0.0.1:${port}/")
     [[ "$body" == *" 0" ]] && pass "PHP_DEBUGGER=none leaves xdebug unloaded" || fail "xdebug still loaded with PHP_DEBUGGER=none: '$body'"
     docker rm -f "$cid" >/dev/null
+    if has_pcov "$img"; then
+        port=$(free_port)
+        cid=$(start_web "$port" -e PHP_DEBUGGER=pcov -v "$WORK/www:/var/www/html:ro" "$img") || fail "dev container (PHP_DEBUGGER=pcov) did not start"
+        docker exec "$cid" php -r 'echo (int)extension_loaded("pcov"), (int)extension_loaded("xdebug");' | grep -qx 10 \
+            && pass "PHP_DEBUGGER=pcov loads PCOV instead of xdebug" || fail "PHP_DEBUGGER=pcov did not switch to PCOV"
+        docker rm -f "$cid" >/dev/null
+    else
+        pcov_refused "$img"
+    fi
+}
+
+# PCOV is only built for the minors pecl-extensions.txt lists it for
+has_pcov() { # IMAGE
+    docker run --rm --entrypoint sh "$1" -c 'test -f "$(php-config --extension-dir)/pcov.so"'
+}
+
+pcov_refused() { # IMAGE  - where PCOV is not built, asking for it must fail clearly
+    local out
+    if out=$(docker run --rm -e PHP_DEBUGGER=pcov "$1" php -v 2>&1); then
+        fail "PHP_DEBUGGER=pcov accepted without PCOV" "$out"
+    fi
+    echo "$out" | grep -q 'pcov is not built' && pass "PHP_DEBUGGER=pcov refused clearly where PCOV is not built" || fail "unclear PCOV error" "$out"
+}
+
+test_php_dev() {
+    local img=$1
+    # everything the php image guarantees (version, extensions, worker, cron, mail, APP_INSTALL)
+    test_php "$img" "$2"
+    echo "== php-dev: $img (expect $2)"
+    local loaded
+    loaded=$(docker run --rm "$img" php -r 'echo (int)extension_loaded("xdebug"), (int)extension_loaded("pcov");' 2>/dev/null)
+    [ "$loaded" = "10" ] && pass "xdebug loaded by default, PCOV not" || fail "default debugger state '$loaded', expected 10"
+    loaded=$(docker run --rm -e PHP_DEBUGGER=none "$img" php -r 'echo (int)extension_loaded("xdebug"), (int)extension_loaded("pcov");' 2>/dev/null)
+    [ "$loaded" = "00" ] && pass "PHP_DEBUGGER=none loads neither" || fail "PHP_DEBUGGER=none state '$loaded', expected 00"
+    docker run --rm -e PHP_DEBUGGER=bogus "$img" php -v >/dev/null 2>&1 && fail "invalid PHP_DEBUGGER accepted" || pass "invalid PHP_DEBUGGER stops the container"
+    local cov
+    if has_pcov "$img"; then
+        loaded=$(docker run --rm -e PHP_DEBUGGER=pcov "$img" php -r 'echo (int)extension_loaded("xdebug"), (int)extension_loaded("pcov");' 2>/dev/null)
+        [ "$loaded" = "01" ] && pass "PHP_DEBUGGER=pcov loads PCOV instead of xdebug" || fail "PHP_DEBUGGER=pcov state '$loaded', expected 01"
+        # PCOV actually collects line coverage for a file under the working directory
+        cov=$(docker run --rm -e PHP_DEBUGGER=pcov -e PCOV_DIRECTORY=/tmp -w /tmp --user 4321:4321 "$img" sh -c '
+            printf "<?php\nfunction f() {\n    return 1;\n}\n" > /tmp/c.php
+            php -r "\pcov\start(); require \"/tmp/c.php\"; f(); \pcov\stop(); echo count(\pcov\collect()[\"/tmp/c.php\"] ?? []);"' 2>/dev/null)
+        [ -n "$cov" ] && [ "$cov" -gt 0 ] && pass "PCOV collects coverage as an arbitrary --user ($cov lines)" || fail "PCOV collected no coverage ('$cov')"
+    else
+        pcov_refused "$img"
+    fi
+    cov=$(docker run --rm -e XDEBUG_MODE=coverage "$img" php -r 'xdebug_start_code_coverage(); $a = 1; echo count(xdebug_get_code_coverage());' 2>/dev/null)
+    [ "$cov" = "1" ] && pass "xdebug coverage mode works (XDEBUG_MODE=coverage)" || fail "xdebug coverage returned '$cov'"
+    local ini
+    ini=$(docker run --rm "$img" php -r 'echo ini_get("memory_limit"), " ", ini_get("display_errors");' 2>/dev/null)
+    [ "$ini" = "-1 1" ] && pass "dev defaults: no memory limit, errors displayed" || fail "dev defaults unexpected: '$ini'"
+    docker run --rm "$img" php -r 'echo 1;' 2>/dev/null | grep -qx 1 && pass "entrypoint log stays off stdout with a debugger loaded" || fail "stdout polluted with a debugger loaded"
+    docker run --rm --read-only --tmpfs /run:uid=1000,gid=1000 --tmpfs /tmp "$img" php -r 'echo (int)extension_loaded("xdebug");' 2>/dev/null | grep -qx 1 \
+        && pass "debugger loads with the read-only rootfs recipe" || fail "debugger missing with the read-only recipe"
+    local ro
+    if ro=$(docker run --rm --read-only --tmpfs /run --tmpfs /tmp "$img" php -v 2>&1); then
+        fail "unwritable /run/php/conf.d accepted silently" "$ro"
+    fi
+    echo "$ro" | grep -q 'cannot write /run/php/conf.d' && pass "unwritable /run fails clearly instead of loading no debugger" || fail "unclear error for unwritable /run" "$ro"
 }
 
 # FastCGI request to a php-fpm container from another container on the same network, the way a
@@ -398,6 +459,7 @@ case "${1:-}" in
     php)           test_php "$2" "$3" ;;
     php-nginx)     test_php_nginx "$2" "$3" ;;
     php-nginx-dev) test_php_nginx_dev "$2" "$3" ;;
+    php-dev)       test_php_dev "$2" "$3" ;;
     php-fpm)       test_php_fpm "$2" "$3" ;;
     all)
         minor="${2:?usage: test.sh all MINOR}"
@@ -409,8 +471,9 @@ case "${1:-}" in
         test_php "$PREFIX/php:$tag" "$version"
         test_php_nginx "$PREFIX/php-nginx:$tag" "$version"
         test_php_nginx_dev "$PREFIX/php-nginx-dev:$tag" "$version"
+        test_php_dev "$PREFIX/php-dev:$tag" "$version"
         test_php_fpm "$PREFIX/php-fpm:$tag" "$version"
         ;;
-    *) sed -n '3,13p' "$0"; exit 2 ;;
+    *) sed -n '3,14p' "$0"; exit 2 ;;
 esac
 echo "all checks passed"

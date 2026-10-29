@@ -135,7 +135,9 @@ PHP-FPM without a web server. Uses the PHP-FPM settings above with `PHP_FPM_LIST
 
 Inherits everything from php-nginx and adds:
 
-- **`PHP_DEBUGGER`**: `xdebug` (default) loads Xdebug with the settings below; `none` leaves it unloaded.
+- **`PHP_DEBUGGER`**: `xdebug` (default) loads Xdebug with the settings below, `pcov` loads PCOV instead, `none` loads neither. Any other value stops the container, as does `pcov` on PHP 8.6, where PCOV is not built yet (its 8.6 fixes are unmerged upstream). The ini is rendered by `render_debugger` in `entrypoint-lib.sh` from templates in `/usr/local/etc/php/debug/`.
+- **`PCOV_DIRECTORY`**: Directory PCOV collects coverage for. Default empty, which lets PCOV detect `src`, `lib` or `app`.
+- **`PCOV_EXCLUDE`**: Regex of paths PCOV skips. Default empty.
 - **`XDEBUG_MODE`**: Default `develop,debug`.
 - **`XDEBUG_START_WITH_REQUEST`**: Default `trigger`. Use `yes` to debug every request.
 - **`XDEBUG_CLIENT_HOST`** / **`XDEBUG_CLIENT_PORT`**: Default `host.docker.internal` / `9003`.
@@ -144,5 +146,13 @@ Inherits everything from php-nginx and adds:
 - **`XDEBUG_OUTPUT_DIR`**: Default `/tmp/xdebug`.
 - **`XDEBUG_LOG_LEVEL`**: Default `3`.
 - **`NGINX_NO_CACHE_PATTERN`**: Regex of asset paths served with `Cache-Control: no-store` and `sendfile off`. Default matches common static extensions; empty disables the snippet.
-- **`PHP_INI_SCAN_DIR`**: Set to `:/run/php/conf.d` so the rendered Xdebug ini is loaded in addition to the stock `conf.d`.
+- **`PHP_INI_SCAN_DIR`**: Set to `:/run/php/conf.d` so the rendered debugger ini is loaded in addition to the stock `conf.d`.
 - Overrides `PHP_DISPLAY_ERRORS=On` and `PHP_ERROR_REPORTING=E_ALL`.
+
+## `alpine/php-dev/Dockerfile`
+
+The php CLI image plus Xdebug and PCOV, for test suites, coverage and static analysis locally or in CI. Its entrypoint loads the debugger and then runs the php entrypoint, so every php image variable (worker mode, cron, `APP_INSTALL`, `php.*` overrides) applies unchanged. Adds:
+
+- **`PHP_DEBUGGER`**, **`PCOV_DIRECTORY`**, **`PCOV_EXCLUDE`** and every **`XDEBUG_*`** variable, with the same meaning and defaults as php-nginx-dev above.
+- **`PHP_INI_SCAN_DIR`**: Set to `:/run/php/conf.d`, as in php-nginx-dev.
+- Overrides `PHP_DISPLAY_ERRORS=On`, `PHP_ERROR_REPORTING=E_ALL` and `PHP_MEMORY_LIMIT=-1` (no limit, for test suites and static analysis).
