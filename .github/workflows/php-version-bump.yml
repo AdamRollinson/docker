@@ -1,7 +1,8 @@
 name: Bump Pinned PHP Versions
 
 # Checks php.net every four hours for newer PHP releases (and PECL for patch releases of the
-# extensions in alpine/php/pecl-extensions.txt). When one appears, the pin with its checksum
+# extensions in alpine/php/pecl-extensions.txt, and GitHub and go.dev for the FrankenPHP and Go
+# releases in alpine/frankenphp/frankenphp-version.txt). When one appears, the pin with its checksum
 # and tarball URL is updated in alpine/php-versions.txt, the change is recorded on the
 # documentation changelog, both are committed to main and the Docker build workflow is
 # dispatched so the new images are compiled and pushed without manual intervention.
@@ -38,12 +39,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if git diff --quiet alpine/php-versions.txt alpine/php/pecl-extensions.txt; then
+          if git diff --quiet alpine/php-versions.txt alpine/php/pecl-extensions.txt alpine/frankenphp/frankenphp-version.txt; then
             echo "Nothing to bump"
             exit 0
           fi
           releases=$( { git diff -U0 alpine/php-versions.txt | awk '/^\+[0-9]/ { print $2 }'
-                        git diff -U0 alpine/php/pecl-extensions.txt | awk '/^\+[a-z]/ { print $2 " " $3 }'; } \
+                        git diff -U0 alpine/php/pecl-extensions.txt | awk '/^\+[a-z]/ { print $2 " " $3 }'
+                        git diff -U0 alpine/frankenphp/frankenphp-version.txt | awk '/^\+[a-z]/ { print substr($1, 2) " " $2 }'; } \
                       | paste -sd, - | sed 's/,/, /g')
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

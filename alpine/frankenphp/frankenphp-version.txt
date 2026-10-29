@@ -1,0 +1,9 @@
+# FrankenPHP release compiled into rollogi/frankenphp, and the Go toolchain that builds it.
+#   frankenphp <version> <sha256 of the release tarball, archive/refs/tags/v<version>.tar.gz>
+#   go <version>
+# Alpine's go package only bootstraps the build: GOTOOLCHAIN=go<version> makes the go command
+# download that toolchain and verify it against the Go checksum database (sum.golang.org), and
+# the Go modules FrankenPHP needs are verified against its go.sum.
+# alpine/check-php-versions.sh reports newer releases of both and --update applies them.
+frankenphp 1.13.4 855d2e725cf4882e489cabf89f1827ff7e7991de348ed6d2e702056016751462
+go 1.27.3

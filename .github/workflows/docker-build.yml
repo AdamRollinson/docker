@@ -31,6 +31,7 @@ env:
   PHP_NGINX_IMAGE: php-nginx
   PHP_NGINX_DEV_IMAGE: php-nginx-dev
   PHP_FPM_IMAGE: php-fpm
+  FRANKENPHP_IMAGE: frankenphp
   BUILDX_VERSION: v0.38.1
   # Images are pushed under this tag first, scanned, and only then promoted to their real tags
   CANDIDATE_TAG: candidate-${{ github.sha }}
@@ -458,6 +459,59 @@ jobs:
           provenance: true
           sbom: true
 
+      # ---- FrankenPHP image (its own thread-safe PHP from the same pinned tarball) --------
+      # Not FROM the php digest: FrankenPHP needs a ZTS libphp, so it compiles PHP itself. The
+      # context is alpine/ so the keyring and PECL pins are shared with the php image.
+      - name: Build FrankenPHP Image (${{ matrix.minor }}, ${{ matrix.arch }}) locally
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          platforms: ${{ matrix.platform }}
+          context: ./alpine
+          file: ./alpine/frankenphp/Dockerfile
+          cache-from: type=gha,scope=frankenphp-${{ matrix.minor }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=frankenphp-${{ matrix.minor }}-${{ matrix.arch }}
+          pull: true
+          build-args: |
+            APK_INDEX_HASH=${{ needs.php-matrix.outputs.apk }}
+            PHP_VERSION=${{ env.PHP_VERSION }}
+            PHP_PATCH_VERSION=${{ matrix.patch }}
+            PHP_SOURCE_URL=${{ matrix.url }}
+            PHP_SOURCE_SHA256=${{ matrix.sha256 }}
+          load: true
+          tags: local/${{ env.FRANKENPHP_IMAGE }}
+          provenance: false
+          sbom: false
+
+      - name: Run Trivy vulnerability scanner on FrankenPHP Image (${{ matrix.minor }}, ${{ matrix.arch }})
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: local/${{ env.FRANKENPHP_IMAGE }}
+          format: 'table'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
+
+      - name: Smoke test FrankenPHP Image (${{ matrix.minor }}, ${{ matrix.arch }})
+        run: alpine/test.sh frankenphp local/${{ env.FRANKENPHP_IMAGE }} ${{ matrix.patch }}
+
+      - name: Build FrankenPHP Image (${{ matrix.minor }}, ${{ matrix.arch }}) by digest
+        id: frankenphp
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          platforms: ${{ matrix.platform }}
+          context: ./alpine
+          file: ./alpine/frankenphp/Dockerfile
+          cache-from: type=gha,scope=frankenphp-${{ matrix.minor }}-${{ matrix.arch }}
+          build-args: |
+            APK_INDEX_HASH=${{ needs.php-matrix.outputs.apk }}
+            PHP_VERSION=${{ env.PHP_VERSION }}
+            PHP_PATCH_VERSION=${{ matrix.patch }}
+            PHP_SOURCE_URL=${{ matrix.url }}
+            PHP_SOURCE_SHA256=${{ matrix.sha256 }}
+          outputs: type=image,name=${{ env.DOCKER_REGISTRY }}/${{ env.FRANKENPHP_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          provenance: true
+          sbom: true
+
       # One file per image, named "<image> <digest>", so the publish job can join them
       - name: Export digests
         run: |
@@ -465,7 +519,8 @@ jobs:
           for pair in "${PHP_IMAGE} ${{ steps.php.outputs.digest }}" \
                       "${PHP_NGINX_IMAGE} ${{ steps.php-nginx.outputs.digest }}" \
                       "${PHP_NGINX_DEV_IMAGE} ${{ steps.php-nginx-dev.outputs.digest }}" \
-                      "${PHP_FPM_IMAGE} ${{ steps.php-fpm.outputs.digest }}"; do
+                      "${PHP_FPM_IMAGE} ${{ steps.php-fpm.outputs.digest }}" \
+                      "${FRANKENPHP_IMAGE} ${{ steps.frankenphp.outputs.digest }}"; do
             set -- $pair
             touch "${{ runner.temp }}/digests/$1 ${2#sha256:}"
           done
@@ -492,7 +547,7 @@ jobs:
     steps:
       # Every image published for this minor, in dependency order (php before the images on it)
       - name: Select images (${{ matrix.minor }})
-        run: echo "IMAGES=${PHP_IMAGE} ${PHP_NGINX_IMAGE} ${PHP_NGINX_DEV_IMAGE} ${PHP_FPM_IMAGE}" >> "$GITHUB_ENV"
+        run: echo "IMAGES=${PHP_IMAGE} ${PHP_NGINX_IMAGE} ${PHP_NGINX_DEV_IMAGE} ${PHP_FPM_IMAGE} ${FRANKENPHP_IMAGE}" >> "$GITHUB_ENV"
 
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -556,6 +611,14 @@ jobs:
         with:
           command: attestation-add
           image: ${{ env.DOCKER_REGISTRY }}/${{ env.PHP_FPM_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
+          file: .vex/openvex.json
+          predicate-type: https://openvex.dev/ns/v0.2.0
+
+      - name: Attach VEX attestation to FrankenPHP Image (${{ matrix.minor }}) candidate
+        uses: docker/scout-action@221e7f4860634eeb1579e3bd7ca232e577bd1864 # v1.26.0
+        with:
+          command: attestation-add
+          image: ${{ env.DOCKER_REGISTRY }}/${{ env.FRANKENPHP_IMAGE }}:${{ env.CANDIDATE_TAG }}-${{ matrix.minor }}
           file: .vex/openvex.json
           predicate-type: https://openvex.dev/ns/v0.2.0
 

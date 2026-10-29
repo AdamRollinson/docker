@@ -11,6 +11,7 @@ Docker image build system that produces multi-architecture (amd64/arm64) PHP con
 3. **`rollogi/php-nginx:{version}`** - PHP-FPM + Nginx web stack (builds on php)
 4. **`rollogi/php-nginx-dev:{version}`** - php-nginx plus Xdebug and development defaults (builds on php-nginx)
 5. **`rollogi/php-fpm:{version}`** - PHP-FPM only, listening on `0.0.0.0:9000`, for a web server in another container (builds on php)
+6. **`rollogi/frankenphp:{version}`** - FrankenPHP (Caddy with PHP embedded), worker mode and automatic HTTPS; compiles its own thread-safe PHP (builds on base, not php)
 
 Supported PHP versions: **8.2, 8.3, 8.4, 8.5**, plus **8.6** as a pre-release (php.net release candidate tarball) on the `8.6-rc` channel tag (no bare `8.6` tag until 8.6.0 is pinned)
 
@@ -23,7 +24,7 @@ The exact release for each minor version is pinned in `alpine/php-versions.txt` 
 # From the alpine/ directory:
 cd alpine && ./build.sh
 ```
-This builds all images sequentially: base, then php, php-nginx, php-nginx-dev and php-fpm for each of the 5 versions. Images are tagged locally with both the minor and the pinned release (e.g., `rollogi/php:8.3` and `rollogi/php:8.3.36`). `build.sh` passes the sha256 and URL columns as `PHP_SOURCE_SHA256`/`PHP_SOURCE_URL` and forwards `PHP_EXTRA_EXTENSIONS`/`PHP_EXTRA_BUILD_DEPS` from the environment. PHP is compiled, so a cold build takes several minutes per version.
+This builds all images sequentially: base, then php, php-nginx, php-nginx-dev, php-fpm and frankenphp for each of the 5 versions. Images are tagged locally with both the minor and the pinned release (e.g., `rollogi/php:8.3` and `rollogi/php:8.3.36`). `build.sh` passes the sha256 and URL columns as `PHP_SOURCE_SHA256`/`PHP_SOURCE_URL` and forwards `PHP_EXTRA_EXTENSIONS`/`PHP_EXTRA_BUILD_DEPS` from the environment. PHP is compiled, so a cold build takes several minutes per version.
 
 ### Build a single image manually
 ```bash
@@ -45,10 +46,11 @@ docker build --build-arg PHP_IMAGE_TAG=8.3 --build-arg PHP_VERSION=83 -t rollogi
 ```
 Alpine 3.24
   └── base (tini, supercronic, bash, curl, git, envsubst)
-        └── php:{version} (PHP CLI + FPM compiled from source, Composer, extensions, php-ext-install, php.ini.template)
-              ├── php-nginx:{version} (Nginx, PHP-FPM, config templates)
-              │     └── php-nginx-dev:{version} (Xdebug, no-cache snippet, dev php defaults)
-              └── php-fpm:{version} (PHP-FPM only, FastCGI healthcheck)
+        ├── php:{version} (PHP CLI + FPM compiled from source, Composer, extensions, php-ext-install, php.ini.template)
+        │     ├── php-nginx:{version} (Nginx, PHP-FPM, config templates)
+        │     │     └── php-nginx-dev:{version} (Xdebug, no-cache snippet, dev php defaults)
+        │     └── php-fpm:{version} (PHP-FPM only, FastCGI healthcheck)
+        └── frankenphp:{version} (ZTS PHP + libphp from the same tarball, FrankenPHP, Composer, Caddyfile)
 ```
 
 ### Configuration via Environment Variables
@@ -79,6 +81,9 @@ Runtime state directories (`/run/php`, `/run/nginx`, `/run/cron`, `/run/php/conf
 
 ### FPM-only image (php-fpm)
 `php-fpm` is php (which already contains the `php-fpm` binary from the same source build) plus `fcgi` (for `cgi-fcgi`), with no web server. The pool template `www.conf.template` lives in the php image at `/usr/local/etc/php/` and both php-nginx and php-fpm render it through `render_fpm_config` in `entrypoint-lib.sh` (pool, non-root user/group stripping, `PHP_FPM_LISTEN_ALLOWED_CLIENTS` as `listen.allowed_clients` with `127.0.0.1` always added, master `php-fpm.conf`, `fpm.global.*` and `fpm.pool.*` overrides), so the two images cannot drift. php-fpm defaults `PHP_FPM_LISTEN=0.0.0.0:9000` and `APP_INSTALL_DIR=/var/www/html`, `serve` starts php-fpm plus supercronic when cron is configured, and `HEALTHCHECK` runs `php-fpm-healthcheck`, which sends `/fpm-ping` over FastCGI with `env -i cgi-fcgi` to the port (or socket) from `PHP_FPM_LISTEN`. `test.sh php-fpm` drives it from a second container on a private Docker network, the way a sidecar would.
+
+### FrankenPHP image (frankenphp)
+`alpine/frankenphp/Dockerfile` is built with the **`alpine/` directory as context** (`-f alpine/frankenphp/Dockerfile alpine`, `context: ./alpine` in CI) so it reuses `php/php-keyring.asc`, `php/php-ext-install`, `php/pecl-extensions.txt`, `php/php.ini.template` and `php/msmtprc.template` without copies. It does not build on rollogi/php: FrankenPHP needs a thread-safe PHP built as a library, so the builder compiles the same pinned tarball (same checksum and `gpgv` checks, same extension flags and PECL `php` lines) with `--enable-embed --enable-zts --disable-zend-signals --enable-zend-max-execution-timers` and no FPM. It then builds FrankenPHP from the release tarball pinned (with sha256) in `alpine/frankenphp/frankenphp-version.txt` using `go build` directly (not xcaddy), with `GOTOOLCHAIN=go<version>` from the same file (Alpine's `go` only bootstraps; the toolchain is verified against sum.golang.org), FrankenPHP's own cgo flags and its musl stack-size linker flag, and tags `nobadger,nomysql,nopgx,deprecated_topic,deprecated_claim,nowatcher,nomercure` (no e-dant watcher C library, no AGPL Mercure). `scanelf` runs after the Go build so brotli and libphp's dependencies land in `runtime-deps.txt`. The runtime stage asserts `PHP_ZTS` and that `frankenphp version` embeds the pinned release. Config is the root-owned `/etc/frankenphp/Caddyfile`, which uses Caddy's own `{$VAR}` substitution (nothing rendered): `SERVER_NAME` (default `:80`, plain HTTP; a host name enables automatic HTTPS), `SERVER_ROOT` (`/app/public`), `/health` via `respond`, hidden files 403 except `/.well-known/`, security headers with `-Server`/`-X-Powered-By`, `{$CADDY_*}` and `{$FRANKENPHP_CONFIG}` splice points, and `import Caddyfile.d/*.caddyfile`. `frankenphp-entrypoint.sh` derives `CADDY_LOG_OUTPUT`/`CADDY_LOG_FORMAT` from `LOG_MODE`/`LOG_FORMAT`, prepends `num_threads`/`worker` lines built from `FRANKENPHP_NUM_THREADS`, `FRANKENPHP_WORKER` and `FRANKENPHP_WORKER_NUM` to `FRANKENPHP_CONFIG`, defaults `PHP_SESSION_COOKIE_SECURE` from `SERVER_NAME`, renders php.ini into `/run/php`, runs `APP_INSTALL` in `/app`, and `serve` starts `frankenphp run` (plus supercronic) through `run-service frankenphp`. `HEALTHCHECK` runs `frankenphp-healthcheck` against Caddy's admin `/metrics` on `localhost:2019`, which works with or without HTTPS. Caddy state lives in `/data` and `/config` (XDG dirs, sticky 1777). Port 80 is bound without file capabilities thanks to Docker's default unprivileged-port sysctl. `check-php-versions.sh` reports and `--update` applies new FrankenPHP releases (GitHub, with a fresh checksum) and Go stable releases (go.dev), and the bump workflow commits that file too.
 
 ### Development image (php-nginx-dev)
 `php-nginx-dev-entrypoint.sh` renders `/run/php/conf.d/50-xdebug.ini` (loaded through `PHP_INI_SCAN_DIR=:/run/php/conf.d`, which keeps the stock scan dir) when `PHP_DEBUGGER=xdebug`, renders the `NGINX_NO_CACHE_PATTERN` location into `/run/nginx/after.d/no-cache.conf`, then execs the php-nginx entrypoint. Xdebug is compiled in the dev Dockerfile with a throwaway `.xdebug-build` toolchain via `php-ext-install --no-enable`, at the `dev xdebug` version `/usr/local/etc/php/pecl-extensions.txt` lists for the minor (3.5.x for 8.2 to 8.5, the 3.6.0alpha1 tarball from xdebug.org for 8.6), so nothing loads it until the entrypoint renders an ini.
@@ -171,6 +176,10 @@ A Nuxt 4 site built from the Nuxt UI docs template with `@nuxt/ui`, `@nuxt/conte
 | `alpine/php-fpm/Dockerfile` | PHP-FPM only image |
 | `alpine/php-fpm/php-fpm-entrypoint.sh` | Renders php.ini and the pool, runs php-fpm (and cron) |
 | `alpine/php-fpm/php-fpm-healthcheck` | FastCGI ping healthcheck |
+| `alpine/frankenphp/Dockerfile` | FrankenPHP image: ZTS PHP + FrankenPHP from source (build context `alpine/`) |
+| `alpine/frankenphp/frankenphp-version.txt` | Pinned FrankenPHP release (with sha256) and Go toolchain version |
+| `alpine/frankenphp/Caddyfile` | Caddy config with `{$VAR}` placeholders, shipped as is |
+| `alpine/frankenphp/frankenphp-entrypoint.sh` | Renders php.ini, derives Caddy log and worker settings, runs FrankenPHP (and cron) |
 | `ENV.md` | Complete environment variable reference |
 | `docs/` | Nuxt documentation site deployed to Cloudflare Workers as static assets |
 | `SECURITY.md` | CVE details and VEX attestation documentation |

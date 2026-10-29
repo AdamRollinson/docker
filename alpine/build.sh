@@ -9,6 +9,7 @@ PHP_IMAGE="rollogi/php"
 PHP_NGINX_IMAGE="rollogi/php-nginx"
 PHP_NGINX_DEV_IMAGE="rollogi/php-nginx-dev"
 PHP_FPM_IMAGE="rollogi/php-fpm"
+FRANKENPHP_IMAGE="rollogi/frankenphp"
 PHP_VERSIONS_FILE="$(dirname "$0")/php-versions.txt"
 
 # Read "<minor> <release> <sha256> <url>" lines from php-versions.txt, skipping comments and blank lines
@@ -101,6 +102,26 @@ while read -r version patch _; do
         -t "$IMAGE_TAG" \
         -t "$PATCH_TAG" \
         ./php-fpm
+done < <(read_php_versions)
+
+# Build FrankenPHP images: their own thread-safe PHP from the same pinned tarball, so the build
+# context is this directory (shared keyring and PECL pins) rather than ./frankenphp
+while read -r version patch sha256 url; do
+    PHP_VERSION_ENV=$(echo "$version" | tr -d '.')
+    CHANNEL=$(channel_tag "$version" "$patch")
+    IMAGE_TAG="$FRANKENPHP_IMAGE:$CHANNEL"
+    PATCH_TAG="$FRANKENPHP_IMAGE:$patch"
+
+    echo "🧟 Building FRANKENPHP image: $IMAGE_TAG ($PATCH_TAG) with PHP_PATCH_VERSION=$patch"
+    docker build \
+        -f ./frankenphp/Dockerfile \
+        --build-arg PHP_VERSION="$PHP_VERSION_ENV" \
+        --build-arg PHP_PATCH_VERSION="$patch" \
+        --build-arg PHP_SOURCE_SHA256="$sha256" \
+        --build-arg PHP_SOURCE_URL="$url" \
+        -t "$IMAGE_TAG" \
+        -t "$PATCH_TAG" \
+        .
 done < <(read_php_versions)
 
 echo "✅ All images built successfully!"

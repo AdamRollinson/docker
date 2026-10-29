@@ -131,6 +131,22 @@ All SSL settings are opt-in. When `NGINX_SSL_ENABLED` is `false` (the default), 
 
 PHP-FPM without a web server. Uses the PHP-FPM settings above with `PHP_FPM_LISTEN=0.0.0.0:9000` and `APP_INSTALL_DIR=/var/www/html`; `PHP_SESSION_COOKIE_SECURE` defaults to `Off` because TLS terminates in the web server container.
 
+## `alpine/frankenphp/Dockerfile`
+
+Its own thread-safe PHP build with the php image's settings above (`PHP_*`, `OPCACHE_*`, `php.*`, mail, cron, `APP_INSTALL` with `APP_INSTALL_DIR=/app`), plus:
+
+- **`SERVER_NAME`**: Caddy site address. Default `:80` (plain HTTP). A host name turns on automatic HTTPS; `PHP_SESSION_COOKIE_SECURE` then defaults to `On`, otherwise `Off`.
+- **`SERVER_ROOT`**: Document root. Default `/app/public`.
+- **`FRANKENPHP_WORKER`**: Worker script kept in memory between requests. Empty (default) is classic mode.
+- **`FRANKENPHP_WORKER_NUM`**: Worker threads for that script. Empty lets FrankenPHP decide.
+- **`FRANKENPHP_NUM_THREADS`**: Total PHP threads. Empty lets FrankenPHP decide.
+- **`FRANKENPHP_CONFIG`**: Extra lines for the global `frankenphp` block.
+- **`CADDY_GLOBAL_OPTIONS`**, **`CADDY_EXTRA_CONFIG`**, **`CADDY_SERVER_EXTRA_DIRECTIVES`**: Spliced into the Caddyfile as global options, top-level config and site-block directives.
+- **`CADDY_LOG_OUTPUT`** / **`CADDY_LOG_FORMAT`**: Derived from `LOG_MODE` and `LOG_FORMAT` (`stderr` or `file /var/log/frankenphp/caddy.log`; `console` or `json`). Set them to override.
+- **`XDG_DATA_HOME`** / **`XDG_CONFIG_HOME`**: Caddy's certificate store and autosaved config. Default `/data` and `/config`.
+
+Build arguments: `PHP_VERSION`, `PHP_PATCH_VERSION` (required), `PHP_SOURCE_URL` and `PHP_SOURCE_SHA256`, as for the php image. The FrankenPHP release and Go toolchain come from `alpine/frankenphp/frankenphp-version.txt`.
+
 ## `alpine/php-nginx-dev/Dockerfile`
 
 Inherits everything from php-nginx and adds:

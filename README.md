@@ -13,6 +13,7 @@ Full documentation: https://docker.rollogi.co.uk (source in `docs/`). This READM
 | `rollogi/php-nginx:{version}` | PHP-FPM + Nginx web stack with optional HTTPS |
 | `rollogi/php-nginx-dev:{version}` | php-nginx plus Xdebug, visible errors and uncached assets, for local development |
 | `rollogi/php-fpm:{version}` | PHP-FPM only on port 9000, for nginx or Caddy in another container or a Kubernetes sidecar |
+| `rollogi/frankenphp:{version}` | [FrankenPHP](https://frankenphp.dev): Caddy with PHP embedded, with worker mode and automatic HTTPS |
 
 **Supported PHP versions:** 8.2, 8.3, 8.4, 8.5, and 8.6 as a pre-release
 
@@ -25,10 +26,11 @@ Pre-releases live on a channel tag. PHP 8.6 is compiled from the release manager
 ```
 Alpine 3.24
   └── base (tini, supercronic, bash, curl, git, envsubst)
-        └── php:{version} (PHP CLI + FPM compiled from source, Composer, extensions)
-              ├── php-nginx:{version} (Nginx, PHP-FPM, SSL support)
-              │     └── php-nginx-dev:{version} (Xdebug, dev defaults)
-              └── php-fpm:{version} (PHP-FPM only, FastCGI healthcheck)
+        ├── php:{version} (PHP CLI + FPM compiled from source, Composer, extensions)
+        │     ├── php-nginx:{version} (Nginx, PHP-FPM, SSL support)
+        │     │     └── php-nginx-dev:{version} (Xdebug, dev defaults)
+        │     └── php-fpm:{version} (PHP-FPM only, FastCGI healthcheck)
+        └── frankenphp:{version} (thread-safe PHP from the same source, FrankenPHP, Composer)
 ```
 
 ## Quick start
@@ -56,6 +58,22 @@ docker run --rm -d --name php --network app -v $(pwd):/var/www/html:ro rollogi/p
 ```
 
 `php-fpm` listens on `0.0.0.0:9000`, answers a FastCGI healthcheck on its ping path, and takes every `PHP_*`, `php.*` and `fpm.pool.*` setting the web image does. `PHP_FPM_LISTEN_ALLOWED_CLIENTS` restricts which addresses may connect. Keep port 9000 on a private network.
+
+### FrankenPHP
+
+```bash
+# Plain HTTP on port 80, serving /app/public
+docker run --rm -d -p 8080:80 -v $(pwd):/app rollogi/frankenphp:8.4
+
+# Worker mode: index.php boots once and handles requests in a frankenphp_handle_request() loop
+docker run --rm -d -p 8080:80 -v $(pwd):/app -e FRANKENPHP_WORKER=/app/public/index.php rollogi/frankenphp:8.4
+
+# Automatic HTTPS for a real host name (Caddy obtains and renews the certificate; keep /data)
+docker run --rm -d -p 80:80 -p 443:443 -p 443:443/udp -v $(pwd):/app -v caddy-data:/data \
+  -e SERVER_NAME=app.example.com rollogi/frankenphp:8.4
+```
+
+`frankenphp` is its own PHP build (thread safe, which FrankenPHP requires) from the same pinned tarball, checks and extensions as `rollogi/php`, so it is not built on that image. It takes every `PHP_*` and `php.*` setting plus `APP_INSTALL`, cron, mail and logging, like the other images. See [FrankenPHP settings](#frankenphp-settings).
 
 ### PHP-FPM + Nginx (HTTPS with self-signed cert)
 
@@ -320,6 +338,22 @@ curl -sf http://localhost:8080/health
 | `PHP_FPM_ERROR_LOG` | *(by `LOG_MODE`)* | FPM master and pool error log |
 | `PHP_FPM_SLOWLOG` | *(by `LOG_MODE`)* | Slow request log (requests over 5s) |
 
+### FrankenPHP settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SERVER_NAME` | `:80` | Caddy site address. A bare port serves plain HTTP; a host name (`app.example.com`) turns on automatic HTTPS on 80 and 443 |
+| `SERVER_ROOT` | `/app/public` | Document root |
+| `FRANKENPHP_WORKER` | *(empty)* | Worker script kept in memory between requests; empty runs every request from scratch (classic mode) |
+| `FRANKENPHP_WORKER_NUM` | *(automatic)* | Number of worker threads for that script |
+| `FRANKENPHP_NUM_THREADS` | *(automatic)* | Total PHP threads |
+| `FRANKENPHP_CONFIG` | *(empty)* | Extra lines for the global `frankenphp` block |
+| `CADDY_GLOBAL_OPTIONS` | *(empty)* | Extra Caddy global options (for example `email you@example.com`) |
+| `CADDY_EXTRA_CONFIG` | *(empty)* | Extra top-level Caddyfile config, such as more site blocks |
+| `CADDY_SERVER_EXTRA_DIRECTIVES` | *(empty)* | Extra directives inside the site block, before `php_server` |
+
+Site blocks can also be mounted as `/etc/frankenphp/Caddyfile.d/*.caddyfile`. `/health` answers `OK` without running PHP, hidden files other than `/.well-known/` return 403, and the healthcheck asks Caddy's admin endpoint on `localhost:2019`, which is never published. Certificates live in `/data` and Caddy's autosaved config in `/config`, so mount a volume on `/data` when Caddy manages HTTPS.
+
 ### SSL / HTTPS settings
 
 SSL is opt-in. Set `NGINX_SSL_ENABLED=true` to enable. When disabled (default), all SSL variables are ignored.
@@ -411,7 +445,7 @@ See [SECURITY.md](SECURITY.md) for CVE details and VEX attestations.
 cd alpine && ./build.sh
 ```
 
-This builds all 21 images sequentially: base, php, php-nginx, php-nginx-dev and php-fpm (x5 versions each). PHP is compiled from source, so the first build of each version takes several minutes.
+This builds all 26 images sequentially: base, php, php-nginx, php-nginx-dev, php-fpm and frankenphp (x5 versions each). PHP is compiled from source (twice per version, since frankenphp needs a thread-safe build), so the first build of each version takes several minutes.
 
 ### Pinned PHP releases
 
@@ -462,6 +496,14 @@ docker build \
   --build-arg PHP_VERSION=84 \
   -t rollogi/php-nginx:8.4 \
   ./alpine/php-nginx
+
+# FrankenPHP 8.4 (its own thread-safe PHP; the build context is alpine/, shared with php)
+docker build \
+  -f ./alpine/frankenphp/Dockerfile \
+  --build-arg PHP_VERSION=84 \
+  --build-arg PHP_PATCH_VERSION=8.4.27 \
+  -t rollogi/frankenphp:8.4 \
+  ./alpine
 ```
 
 ## CI/CD

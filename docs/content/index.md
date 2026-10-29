@@ -129,6 +129,18 @@ Each image builds on the one before it, so behaviour is consistent from the CLI 
 
   :::u-page-feature
   ---
+  icon: i-lucide-zap
+  to: /images/frankenphp
+  ---
+  #title
+  frankenphp
+
+  #description
+  Caddy with PHP embedded: worker mode, automatic HTTPS and no FastCGI hop, from the same verified PHP source.
+  :::
+
+  :::u-page-feature
+  ---
   icon: i-lucide-pin
   to: /getting-started/tags-and-versions
   ---

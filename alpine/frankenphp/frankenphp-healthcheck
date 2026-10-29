@@ -1,0 +1,5 @@
+#!/bin/sh
+# Docker HEALTHCHECK for the frankenphp image: asks Caddy's admin endpoint (localhost:2019, never
+# published) whether the server is up. It answers the same way whether the site is plain HTTP or
+# behind Caddy's automatic HTTPS, which a request to the site itself would not.
+exec curl -fsS -o /dev/null --max-time 2 http://localhost:2019/metrics

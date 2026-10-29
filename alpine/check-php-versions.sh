@@ -18,6 +18,7 @@ set -euo pipefail
 DIR="$(dirname "$0")"
 VERSIONS_FILE="$DIR/php-versions.txt"
 PECL_FILE="$DIR/php/pecl-extensions.txt"
+FRANKENPHP_FILE="$DIR/frankenphp/frankenphp-version.txt"
 UPDATE=false
 [ "${1:-}" = "--update" ] && UPDATE=true
 
@@ -141,6 +142,41 @@ while read -r image name source pinned_sha minors; do
     fi
 done < <(grep -Ev '^[[:space:]]*(#|$)' "$PECL_FILE")
 
+# FrankenPHP (latest GitHub release, with the tarball checksum) and the Go toolchain that builds
+# it (latest stable from go.dev), for the frankenphp image
+franken_updates=0
+pinned=$(awk '$1 == "frankenphp" { print $2 }' "$FRANKENPHP_FILE")
+latest=$(curl -sSf --max-time 20 https://api.github.com/repos/php/frankenphp/releases/latest | jq -r '.tag_name | ltrimstr("v")' 2>/dev/null) || latest=""
+if [ -z "$latest" ]; then
+    echo "FrankenPHP: pinned $pinned, lookup failed"
+elif is_newer "$latest" "$pinned"; then
+    echo "FrankenPHP: pinned $pinned, latest release $latest, update available"
+    franken_updates=$((franken_updates + 1))
+    if $UPDATE; then
+        new_sha=$(curl -sSfL "https://github.com/php/frankenphp/archive/refs/tags/v${latest}.tar.gz" | sha256)
+        awk -v line="frankenphp $latest $new_sha" '$1 == "frankenphp" { print line; next } { print }' "$FRANKENPHP_FILE" > "$TMP/franken" \
+            && cat "$TMP/franken" > "$FRANKENPHP_FILE"
+        echo "FrankenPHP: updated to $latest"
+    fi
+else
+    echo "FrankenPHP: pinned $pinned, latest release $latest"
+fi
+pinned=$(awk '$1 == "go" { print $2 }' "$FRANKENPHP_FILE")
+latest=$(curl -sSf --max-time 20 'https://go.dev/dl/?mode=json' | jq -r '[.[] | select(.stable)][0].version | ltrimstr("go")' 2>/dev/null) || latest=""
+if [ -z "$latest" ]; then
+    echo "Go: pinned $pinned, lookup failed"
+elif is_newer "$latest" "$pinned"; then
+    echo "Go: pinned $pinned, latest stable $latest, update available"
+    franken_updates=$((franken_updates + 1))
+    if $UPDATE; then
+        awk -v line="go $latest" '$1 == "go" { print line; next } { print }' "$FRANKENPHP_FILE" > "$TMP/franken" \
+            && cat "$TMP/franken" > "$FRANKENPHP_FILE"
+        echo "Go: updated to $latest"
+    fi
+else
+    echo "Go: pinned $pinned, latest stable $latest"
+fi
+
 if [ "$updates" -eq 0 ] && [ "$skipped" -eq 0 ]; then
     echo "All pinned PHP releases match php.net"
 elif [ "$updates" -eq 0 ]; then
@@ -150,4 +186,7 @@ elif ! $UPDATE; then
 fi
 if [ "$pecl_updates" -gt 0 ] && ! $UPDATE; then
     echo "$pecl_updates PECL update(s) available, run with --update to apply"
+fi
+if [ "$franken_updates" -gt 0 ] && ! $UPDATE; then
+    echo "$franken_updates FrankenPHP or Go update(s) available, run with --update to apply"
 fi

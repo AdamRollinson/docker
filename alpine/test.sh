@@ -8,6 +8,7 @@
 #   alpine/test.sh php-nginx     IMAGE EXPECTED_PHP_VERSION
 #   alpine/test.sh php-nginx-dev IMAGE EXPECTED_PHP_VERSION
 #   alpine/test.sh php-fpm       IMAGE EXPECTED_PHP_VERSION
+#   alpine/test.sh frankenphp    IMAGE EXPECTED_PHP_VERSION
 #   alpine/test.sh all           MINOR            # local images rollogi/*:MINOR (or *:MINOR-rc for a pre-release), version from php-versions.txt
 #
 # Exits non-zero on the first failing check. Needs docker and curl.
@@ -393,12 +394,145 @@ test_php_fpm() {
     [ "$out" = "explicit" ] && pass "an explicit command runs instead of php-fpm" || fail "explicit command output unexpected: '$out'"
 }
 
+# Start a frankenphp container listening on 8080, record it for cleanup and wait until PHP
+# answers on / (Caddy's /health answers before the PHP threads are up)
+start_franken() { # PORT DOCKER-RUN-ARGS...
+    local port=$1; shift
+    local cid code=""
+    cid=$(docker run -d --rm -p "127.0.0.1:${port}:8080" -e SERVER_NAME=:8080 "$@")
+    CONTAINERS+=("$cid")
+    for _ in $(seq 1 60); do
+        code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${port}/")
+        [ "$code" = "200" ] && { echo "$cid"; return 0; }
+        sleep 0.5
+    done
+    echo "container did not become ready; last status $code; logs:" >&2
+    docker logs "$cid" 2>&1 | tail -20 >&2
+    return 1
+}
+
+test_frankenphp() {
+    local img=$1 expected; expected=$(normalise "$2")
+    echo "== frankenphp: $img (expect $2)"
+    test_common "$img"
+    local got
+    got=$(docker run --rm "$img" php -r 'echo strtolower(PHP_VERSION), " ", (int)PHP_ZTS;' 2>/dev/null)
+    [ "$got" = "$expected 1" ] && pass "php CLI reports $2 and is thread safe" || fail "php CLI reports '$got', expected '$expected 1'"
+    docker run --rm "$img" frankenphp version 2>/dev/null | tr 'A-Z' 'a-z' | grep -q "php $expected" \
+        && pass "frankenphp embeds PHP $2" || fail "frankenphp version: $(docker run --rm "$img" frankenphp version 2>&1)"
+    local missing
+    missing=$(docker run --rm "$img" php -r 'foreach (["curl","mbstring","intl","pdo_mysql","mysqli","gd","zip","soap","redis","openssl","sockets","sodium","pgsql","pdo_pgsql","sqlite3","pdo_sqlite","apcu","igbinary","msgpack","readline","Zend OPcache"] as $e) if (!extension_loaded($e)) echo $e, " ";')
+    [ -z "$missing" ] && pass "required extensions loaded" || fail "extensions missing: $missing"
+    local packaged
+    packaged=$(docker run --rm --entrypoint sh "$img" -c 'apk list -I 2>/dev/null | awk "{print \$1}" | grep -E "^php[0-9]" || true')
+    [ -z "$packaged" ] && pass "no Alpine php packages installed (PHP is compiled from source)" || fail "Alpine php packages installed" "$packaged"
+    docker run --rm "$img" composer --version >/dev/null 2>&1 && pass "composer runs" || fail "composer does not run"
+
+    make_fixture
+    local port cid body code
+    port=$(free_port)
+    cid=$(start_franken "$port" -e "php.memory_limit=222M" -v "$WORK/www:/app/public:ro" "$img") || fail "non-root container did not start"
+    pass "non-root container serves PHP"
+    body=$(curl -s "http://127.0.0.1:${port}/")
+    [ "$(normalise "${body%% *}")" = "$expected" ] && [[ "$body" == *" 222M 0" ]] \
+        && pass "php via frankenphp reports $2 and php.* override applied" || fail "unexpected response: '$body'"
+    [ "$(curl -s "http://127.0.0.1:${port}/health")" = "OK" ] && pass "/health answers without PHP" || fail "/health did not answer OK"
+    code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${port}/.env")
+    [ "$code" = "403" ] && pass "hidden files denied (/.env -> 403)" || fail "/.env returned $code"
+    code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${port}/.well-known/acme-challenge/abc")
+    [ "$code" = "200" ] && pass "/.well-known served" || fail "/.well-known returned $code"
+    local hdrs
+    hdrs=$(curl -sI "http://127.0.0.1:${port}/" | tr -d '\r')
+    for h in "X-Frame-Options" "X-Content-Type-Options" "Referrer-Policy" "Permissions-Policy"; do
+        echo "$hdrs" | grep -qi "^$h:" || fail "missing security header $h"
+    done
+    pass "security headers present"
+    echo "$hdrs" | grep -qiE "^(X-Powered-By|Server):" && fail "X-Powered-By or Server header exposed" "$hdrs" || pass "X-Powered-By and Server headers hidden"
+    docker exec "$cid" frankenphp-healthcheck && pass "healthcheck passes" || fail "healthcheck failed"
+    local untagged
+    untagged=$(docker logs "$cid" 2>&1 | grep -cvE '^\[(entrypoint|frankenphp)\]' || true)
+    [ "$untagged" = "0" ] && pass "all log lines tagged by service" || fail "$untagged untagged log line(s)" "$(docker logs "$cid" 2>&1 | grep -vE '^\[(entrypoint|frankenphp)\]' | head -3)"
+    docker exec "$cid" sh -c '! test -w /etc/frankenphp/Caddyfile && ! test -w /usr/local/etc/php/conf.d && ! test -w /usr/local/bin/frankenphp' \
+        && pass "config and binaries not writable by runtime user" || fail "config or binaries writable by runtime user"
+    docker rm -f "$cid" >/dev/null
+
+    # worker mode: the script stays in memory, so a counter survives between requests
+    mkdir -p "$WORK/worker/public"
+    printf '%s\n' '<?php' '$count = 0;' \
+        '$handler = static function () use (&$count): void { $count++; header("Content-Type: text/plain"); echo "worker ", $count; };' \
+        'while (frankenphp_handle_request($handler)) { gc_collect_cycles(); }' > "$WORK/worker/public/index.php"
+    chmod -R a+rX "$WORK/worker"
+    port=$(free_port)
+    cid=$(start_franken "$port" -e FRANKENPHP_WORKER=/app/public/index.php -e FRANKENPHP_WORKER_NUM=1 -v "$WORK/worker:/app:ro" "$img") || fail "worker mode container did not start"
+    local first second
+    first=$(curl -s "http://127.0.0.1:${port}/"); second=$(curl -s "http://127.0.0.1:${port}/")
+    [[ "$first" == "worker "* ]] && [ "${second#worker }" = "$(( ${first#worker } + 1 ))" ] \
+        && pass "worker mode keeps state between requests ($first, $second)" || fail "worker mode responses: '$first', '$second'"
+    log_has "$cid" 'in worker mode' && pass "entrypoint reports worker mode" || fail "worker mode not reported"
+    docker rm -f "$cid" >/dev/null
+
+    # read-only root filesystem recipe
+    port=$(free_port)
+    cid=$(docker run -d --rm -p "127.0.0.1:${port}:8080" -e SERVER_NAME=:8080 --read-only \
+        --tmpfs /run:uid=1000,gid=1000 --tmpfs /tmp --tmpfs /var/log:uid=1000,gid=1000 \
+        --tmpfs /data:uid=1000,gid=1000 --tmpfs /config:uid=1000,gid=1000 \
+        --cap-drop ALL --security-opt no-new-privileges -v "$WORK/www:/app/public:ro" "$img")
+    CONTAINERS+=("$cid")
+    for _ in $(seq 1 60); do curl -sf "http://127.0.0.1:${port}/" >/dev/null 2>&1 && break; sleep 0.5; done
+    curl -sf "http://127.0.0.1:${port}/" >/dev/null && pass "read-only rootfs recipe works" || fail "read-only rootfs recipe failed" "$(docker logs "$cid" 2>&1 | tail -5)"
+    docker rm -f "$cid" >/dev/null
+
+    # arbitrary --user: config is rendered into the run dirs and FrankenPHP runs as that uid
+    port=$(free_port)
+    cid=$(start_franken "$port" --user 4321:4321 -e "php.memory_limit=345M" -v "$WORK/www:/app/public:ro" "$img") || fail "container did not start under --user 4321"
+    body=$(curl -s "http://127.0.0.1:${port}/")
+    [[ "$body" == *" 345M "* ]] && pass "arbitrary --user serves php with config rendered" || fail "arbitrary --user response unexpected: '$body'"
+    docker exec "$cid" sh -c 'ps -o user,args | grep "frankenphp run" | grep -v grep | grep -vq "^4321 "' && fail "frankenphp is not running as uid 4321" "$(docker exec "$cid" ps -o user,args)" || pass "frankenphp runs as uid 4321"
+    docker rm -f "$cid" >/dev/null
+
+    # the default site address (:80) as the unprivileged default user
+    port=$(free_port)
+    cid=$(docker run -d --rm -p "127.0.0.1:${port}:80" "$img")
+    CONTAINERS+=("$cid")
+    for _ in $(seq 1 60); do curl -sf "http://127.0.0.1:${port}/" >/dev/null 2>&1 && break; sleep 0.5; done
+    curl -s "http://127.0.0.1:${port}/" | grep -q "rollogi/frankenphp is running" && pass "default image serves its placeholder on port 80 as non-root" || fail "default port 80 failed" "$(docker logs "$cid" 2>&1 | tail -5)"
+    docker rm -f "$cid" >/dev/null
+
+    # JSON logging keeps Caddy's own JSON lines and wraps everything else
+    port=$(free_port)
+    cid=$(start_franken "$port" -e LOG_FORMAT=json "$img") || fail "json logging container did not start"
+    docker logs "$cid" 2>&1 | grep -v '^{' | grep -q . && fail "non-JSON log lines with LOG_FORMAT=json" "$(docker logs "$cid" 2>&1 | grep -v '^{' | head -3)" || pass "LOG_FORMAT=json emits only JSON lines"
+    docker rm -f "$cid" >/dev/null
+
+    # APP_INSTALL runs in /app before FrankenPHP, and a failure stops the container
+    port=$(free_port)
+    cid=$(start_franken "$port" -e APP_INSTALL='echo franken prepared in $(pwd)' "$img") || fail "container with APP_INSTALL did not start"
+    log_has "$cid" '^\[install\] franken prepared in /app$' && pass "APP_INSTALL runs in /app before FrankenPHP" || fail "APP_INSTALL output missing" "$(docker logs "$cid" 2>&1 | head -5)"
+    docker rm -f "$cid" >/dev/null
+    cid=$(docker run -d -e APP_INSTALL='exit 6' "$img"); CONTAINERS+=("$cid")
+    for _ in $(seq 1 20); do [ "$(docker inspect -f '{{.State.Status}}' "$cid")" = "exited" ] && break; sleep 0.5; done
+    local st
+    st="$(docker inspect -f '{{.State.Status}}:{{.State.ExitCode}}' "$cid")"
+    [ "$st" = "exited:6" ] && pass "failed APP_INSTALL stops frankenphp with its exit status" || fail "frankenphp kept running after a failed APP_INSTALL (state $st)"
+    docker rm -f "$cid" >/dev/null
+
+    # cron alongside FrankenPHP, and an explicit command bypasses serve
+    cid=$(docker run -d --rm -e SERVER_NAME=:8080 -e CRON_SCHEDULE='*/1 * * * * * *' -e CRON_COMMAND='echo franken-cron-tick' "$img"); CONTAINERS+=("$cid")
+    sleep 3
+    log_has "$cid" '^\[cron\] franken-cron-tick' && pass "cron runs alongside FrankenPHP" || fail "cron did not run" "$(docker logs "$cid" 2>&1 | tail -5)"
+    docker rm -f "$cid" >/dev/null
+    local out
+    out=$(docker run --rm "$img" php -r 'echo "explicit";' 2>/dev/null)
+    [ "$out" = "explicit" ] && pass "an explicit command runs instead of FrankenPHP" || fail "explicit command output unexpected: '$out'"
+}
+
 case "${1:-}" in
     base)          test_base "$2" ;;
     php)           test_php "$2" "$3" ;;
     php-nginx)     test_php_nginx "$2" "$3" ;;
     php-nginx-dev) test_php_nginx_dev "$2" "$3" ;;
     php-fpm)       test_php_fpm "$2" "$3" ;;
+    frankenphp)    test_frankenphp "$2" "$3" ;;
     all)
         minor="${2:?usage: test.sh all MINOR}"
         version=$(grep -E "^${minor//./\\.} " "$(dirname "$0")/php-versions.txt" | awk '{print $2}')
@@ -410,7 +544,8 @@ case "${1:-}" in
         test_php_nginx "$PREFIX/php-nginx:$tag" "$version"
         test_php_nginx_dev "$PREFIX/php-nginx-dev:$tag" "$version"
         test_php_fpm "$PREFIX/php-fpm:$tag" "$version"
+        test_frankenphp "$PREFIX/frankenphp:$tag" "$version"
         ;;
-    *) sed -n '3,13p' "$0"; exit 2 ;;
+    *) sed -n '3,14p' "$0"; exit 2 ;;
 esac
 echo "all checks passed"
