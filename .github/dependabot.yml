@@ -1,25 +1,33 @@
 version: 2
+
+# Every version update across all ecosystems arrives as one weekly pull request against develop,
+# instead of one pull request per dependency against main. Dependabot reads this file from the
+# default branch (main), so it lives there even though the pull requests target develop.
+# Security updates are not grouped this way: Dependabot always opens them against main.
+multi-ecosystem-groups:
+  dependencies:
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+
 updates:
   - package-ecosystem: github-actions
     directory: /
-    schedule:
-      interval: weekly
+    patterns: ["*"]
+    target-branch: develop
+    multi-ecosystem-group: dependencies
 
   # Keeps the digest-pinned alpine base image current
   - package-ecosystem: docker
     directory: /alpine/base
-    schedule:
-      interval: weekly
+    patterns: ["*"]
+    target-branch: develop
+    multi-ecosystem-group: dependencies
 
   # Documentation site dependencies
   - package-ecosystem: npm
     directory: /docs
-    schedule:
-      interval: weekly
-    groups:
-      nuxt:
-        patterns:
-          - "nuxt"
-          - "@nuxt/*"
-          - "@nuxtjs/*"
-          - "nuxt-*"
+    patterns: ["*"]
+    target-branch: develop
+    multi-ecosystem-group: dependencies
