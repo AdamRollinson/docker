@@ -8,6 +8,8 @@ multi-ecosystem-groups:
   dependencies:
     schedule:
       interval: weekly
+    # target-branch belongs here: Dependabot rejects it on updates that are part of the group
+    target-branch: develop
     labels:
       - dependencies
 
@@ -15,19 +17,16 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     patterns: ["*"]
-    target-branch: develop
     multi-ecosystem-group: dependencies
 
   # Keeps the digest-pinned alpine base image current
   - package-ecosystem: docker
     directory: /alpine/base
     patterns: ["*"]
-    target-branch: develop
     multi-ecosystem-group: dependencies
 
   # Documentation site dependencies
   - package-ecosystem: npm
     directory: /docs
     patterns: ["*"]
-    target-branch: develop
     multi-ecosystem-group: dependencies

@@ -129,6 +129,18 @@ Each image builds on the one before it, so behaviour is consistent from the CLI 
 
   :::u-page-feature
   ---
+  icon: i-lucide-flask-conical
+  to: /images/php-dev
+  ---
+  #title
+  php-dev
+
+  #description
+  The CLI plus Xdebug and PCOV, with errors shown and no memory limit, for test suites, coverage and static analysis in CI.
+  :::
+
+  :::u-page-feature
+  ---
   icon: i-lucide-pin
   to: /getting-started/tags-and-versions
   ---

@@ -1,0 +1,4 @@
+extension=pcov.so
+pcov.enabled=1
+pcov.directory=${PCOV_DIRECTORY}
+pcov.exclude=${PCOV_EXCLUDE}

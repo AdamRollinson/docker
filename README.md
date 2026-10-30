@@ -13,6 +13,7 @@ Full documentation: https://docker.rollogi.co.uk (source in `docs/`). This READM
 | `rollogi/php-nginx:{version}` | PHP-FPM + Nginx web stack with optional HTTPS |
 | `rollogi/php-nginx-dev:{version}` | php-nginx plus Xdebug, visible errors and uncached assets, for local development |
 | `rollogi/php-fpm:{version}` | PHP-FPM only on port 9000, for nginx or Caddy in another container or a Kubernetes sidecar |
+| `rollogi/php-dev:{version}` | PHP CLI plus Xdebug and PCOV, for test suites, coverage and static analysis locally or in CI |
 
 **Supported PHP versions:** 8.2, 8.3, 8.4, 8.5, and 8.6 as a pre-release
 
@@ -28,7 +29,8 @@ Alpine 3.24
         └── php:{version} (PHP CLI + FPM compiled from source, Composer, extensions)
               ├── php-nginx:{version} (Nginx, PHP-FPM, SSL support)
               │     └── php-nginx-dev:{version} (Xdebug, dev defaults)
-              └── php-fpm:{version} (PHP-FPM only, FastCGI healthcheck)
+              ├── php-fpm:{version} (PHP-FPM only, FastCGI healthcheck)
+              └── php-dev:{version} (CLI with Xdebug and PCOV, dev defaults)
 ```
 
 ## Quick start
@@ -205,7 +207,19 @@ docker run --rm -d -p 8080:8080 \
   rollogi/php-nginx-dev:8.4
 ```
 
-Xdebug connects back to `host.docker.internal:9003` by default and only starts when triggered (browser extension, `XDEBUG_TRIGGER` cookie or query string). Set `XDEBUG_START_WITH_REQUEST=yes` to debug every request, or `PHP_DEBUGGER=none` to leave Xdebug unloaded. Static assets are served with `Cache-Control: no-store` so edits show up immediately.
+Xdebug connects back to `host.docker.internal:9003` by default and only starts when triggered (browser extension, `XDEBUG_TRIGGER` cookie or query string). Set `XDEBUG_START_WITH_REQUEST=yes` to debug every request, `PHP_DEBUGGER=pcov` to load PCOV instead, or `PHP_DEBUGGER=none` to load neither. Static assets are served with `Cache-Control: no-store` so edits show up immediately.
+
+### Tests and coverage with php-dev
+
+```bash
+# PHPUnit with PCOV, the fast coverage driver
+docker run --rm -v $(pwd):/app -e PHP_DEBUGGER=pcov rollogi/php-dev:8.4 vendor/bin/phpunit --coverage-text
+
+# Xdebug's coverage mode instead (slower, but also gives path and branch coverage)
+docker run --rm -v $(pwd):/app -e XDEBUG_MODE=coverage rollogi/php-dev:8.4 vendor/bin/phpunit --coverage-text
+```
+
+`php-dev` is the php CLI image plus Xdebug and PCOV, with errors displayed and no memory limit, so PHPUnit, Pest, PHPStan and Psalm run without tuning. In GitHub Actions run it from a step with `docker run` (a job `container:` bypasses the entrypoint, so no driver is loaded); for step debugging a CLI command pass `-e XDEBUG_TRIGGER=1`. Worker mode, cron, `APP_INSTALL` and `php.*` overrides work exactly as in the php image.
 
 ## Configuration
 
@@ -339,11 +353,13 @@ SSL is opt-in. Set `NGINX_SSL_ENABLED=true` to enable. When disabled (default), 
 | `NGINX_SSL_HSTS` | `true` | Strict-Transport-Security header |
 | `NGINX_SSL_HSTS_MAX_AGE` | `63072000` | HSTS max-age (2 years) |
 
-### Development image settings (`php-nginx-dev` only)
+### Development image settings (`php-nginx-dev` and `php-dev`)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PHP_DEBUGGER` | `xdebug` | `xdebug` or `none` |
+| `PHP_DEBUGGER` | `xdebug` | `xdebug`, `pcov` or `none`; any other value stops the container (PCOV is not built for PHP 8.6 yet) |
+| `PCOV_DIRECTORY` | *(empty)* | Directory PCOV collects coverage for; empty lets PCOV detect `src`, `lib` or `app` |
+| `PCOV_EXCLUDE` | *(empty)* | Regex of paths PCOV skips |
 | `XDEBUG_MODE` | `develop,debug` | Xdebug modes (`debug`, `develop`, `coverage`, `profile`, `trace`) |
 | `XDEBUG_START_WITH_REQUEST` | `trigger` | `yes`, `no` or `trigger` |
 | `XDEBUG_CLIENT_HOST` | `host.docker.internal` | IDE host |
@@ -351,9 +367,9 @@ SSL is opt-in. Set `NGINX_SSL_ENABLED=true` to enable. When disabled (default), 
 | `XDEBUG_DISCOVER_CLIENT_HOST` | `false` | Derive the IDE host from the request |
 | `XDEBUG_IDEKEY` | `PHPSTORM` | IDE key |
 | `XDEBUG_OUTPUT_DIR` | `/tmp/xdebug` | Profiles and traces |
-| `NGINX_NO_CACHE_PATTERN` | `\.(css\|js\|...)$` | Assets served with `no-store`; empty disables |
+| `NGINX_NO_CACHE_PATTERN` | `\.(css\|js\|...)$` | Assets served with `no-store`; empty disables (`php-nginx-dev` only) |
 
-The dev image also sets `PHP_DISPLAY_ERRORS=On` and `PHP_ERROR_REPORTING=E_ALL`.
+Both dev images also set `PHP_DISPLAY_ERRORS=On` and `PHP_ERROR_REPORTING=E_ALL`; `php-dev` additionally sets `PHP_MEMORY_LIMIT=-1`.
 
 See [ENV.md](ENV.md) for the complete variable reference including OPcache, security settings, and additional SSL options.
 
@@ -411,7 +427,7 @@ See [SECURITY.md](SECURITY.md) for CVE details and VEX attestations.
 cd alpine && ./build.sh
 ```
 
-This builds all 21 images sequentially: base, php, php-nginx, php-nginx-dev and php-fpm (x5 versions each). PHP is compiled from source, so the first build of each version takes several minutes.
+This builds all 26 images sequentially: base, then php, php-nginx, php-nginx-dev, php-fpm and php-dev (x5 versions each). PHP is compiled from source, so the first build of each version takes several minutes.
 
 ### Pinned PHP releases
 

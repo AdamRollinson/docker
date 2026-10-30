@@ -9,6 +9,7 @@ PHP_IMAGE="rollogi/php"
 PHP_NGINX_IMAGE="rollogi/php-nginx"
 PHP_NGINX_DEV_IMAGE="rollogi/php-nginx-dev"
 PHP_FPM_IMAGE="rollogi/php-fpm"
+PHP_DEV_IMAGE="rollogi/php-dev"
 PHP_VERSIONS_FILE="$(dirname "$0")/php-versions.txt"
 
 # Read "<minor> <release> <sha256> <url>" lines from php-versions.txt, skipping comments and blank lines
@@ -101,6 +102,22 @@ while read -r version patch _; do
         -t "$IMAGE_TAG" \
         -t "$PATCH_TAG" \
         ./php-fpm
+done < <(read_php_versions)
+
+# Build PHP-DEV images (the CLI with Xdebug and PCOV, on the php image)
+while read -r version patch _; do
+    PHP_VERSION_ENV=$(echo "$version" | tr -d '.')
+    CHANNEL=$(channel_tag "$version" "$patch")
+    IMAGE_TAG="$PHP_DEV_IMAGE:$CHANNEL"
+    PATCH_TAG="$PHP_DEV_IMAGE:$patch"
+
+    echo "🧪 Building PHP-DEV image: $IMAGE_TAG ($PATCH_TAG) with PHP_IMAGE_TAG=$CHANNEL and PHP_VERSION=$PHP_VERSION_ENV"
+    docker build \
+        --build-arg PHP_IMAGE_TAG="$CHANNEL" \
+        --build-arg PHP_VERSION="$PHP_VERSION_ENV" \
+        -t "$IMAGE_TAG" \
+        -t "$PATCH_TAG" \
+        ./php-dev
 done < <(read_php_versions)
 
 echo "✅ All images built successfully!"
