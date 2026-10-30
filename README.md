@@ -14,6 +14,7 @@ Full documentation: https://docker.rollogi.co.uk (source in `docs/`). This READM
 | `rollogi/php-nginx-dev:{version}` | php-nginx plus Xdebug, visible errors and uncached assets, for local development |
 | `rollogi/php-fpm:{version}` | PHP-FPM only on port 9000, for nginx or Caddy in another container or a Kubernetes sidecar |
 | `rollogi/php-dev:{version}` | PHP CLI plus Xdebug and PCOV, for test suites, coverage and static analysis locally or in CI |
+| `rollogi/php-slim:{version}` | The same PHP CLI and PHP-FPM on plain Alpine, without bash, Composer or build tooling, for production final stages |
 
 **Supported PHP versions:** 8.2, 8.3, 8.4, 8.5, and 8.6 as a pre-release
 
@@ -25,12 +26,13 @@ Pre-releases live on a channel tag. PHP 8.6 is compiled from the release manager
 
 ```
 Alpine 3.24
-  └── base (tini, supercronic, bash, curl, git, envsubst)
-        └── php:{version} (PHP CLI + FPM compiled from source, Composer, extensions)
-              ├── php-nginx:{version} (Nginx, PHP-FPM, SSL support)
-              │     └── php-nginx-dev:{version} (Xdebug, dev defaults)
-              ├── php-fpm:{version} (PHP-FPM only, FastCGI healthcheck)
-              └── php-dev:{version} (CLI with Xdebug and PCOV, dev defaults)
+  ├── base (tini, supercronic, bash, curl, git, envsubst)
+  │     └── php:{version} (PHP CLI + FPM compiled from source, Composer, extensions)
+  │           ├── php-nginx:{version} (Nginx, PHP-FPM, SSL support)
+  │           │     └── php-nginx-dev:{version} (Xdebug, dev defaults)
+  │           ├── php-fpm:{version} (PHP-FPM only, FastCGI healthcheck)
+  │           └── php-dev:{version} (CLI with Xdebug and PCOV, dev defaults)
+  └── php-slim:{version} (same compiled PHP CLI + FPM from the php build stage, POSIX sh entrypoint, no bash or Composer)
 ```
 
 ## Quick start
@@ -58,6 +60,23 @@ docker run --rm -d --name php --network app -v $(pwd):/var/www/html:ro rollogi/p
 ```
 
 `php-fpm` listens on `0.0.0.0:9000`, answers a FastCGI healthcheck on its ping path, and takes every `PHP_*`, `php.*` and `fpm.pool.*` setting the web image does. `PHP_FPM_LISTEN_ALLOWED_CLIENTS` restricts which addresses may connect. Keep port 9000 on a private network.
+
+### Slim production image
+
+`php-slim` is the same compiled PHP (CLI, PHP-FPM, every extension) on plain Alpine without bash, git, curl, Composer, headers or the logging helpers: 39 MB compressed against 53.5 MB for `php` (8.4, arm64). Install dependencies in `php` and copy the result into it:
+
+```dockerfile
+FROM rollogi/php:8.4 AS deps
+WORKDIR /app
+COPY composer.json composer.lock ./
+RUN composer install --no-dev --no-scripts --prefer-dist --optimize-autoloader
+
+FROM rollogi/php-slim:8.4
+COPY --from=deps /app/vendor /app/vendor
+COPY . /app
+```
+
+The default command prints the PHP version, any other command runs as given, and `serve` runs PHP-FPM on `0.0.0.0:9000` (health check: `php-fpm-healthcheck`). `php.*`, `fpm.pool.*`, `fpm.global.*`, the `PHP_*`/`PHP_FPM_*` settings and `APP_INSTALL` work as in the other images; worker mode, cron, the SMTP relay and per-service log tagging do not exist there, because they need bash or extra packages.
 
 ### PHP-FPM + Nginx (HTTPS with self-signed cert)
 
@@ -427,7 +446,7 @@ See [SECURITY.md](SECURITY.md) for CVE details and VEX attestations.
 cd alpine && ./build.sh
 ```
 
-This builds all 26 images sequentially: base, then php, php-nginx, php-nginx-dev, php-fpm and php-dev (x5 versions each). PHP is compiled from source, so the first build of each version takes several minutes.
+This builds all 31 images sequentially: base, then php, php-slim, php-nginx, php-nginx-dev, php-fpm and php-dev (x5 versions each). PHP is compiled from source, so the first build of each version takes several minutes.
 
 ### Pinned PHP releases
 

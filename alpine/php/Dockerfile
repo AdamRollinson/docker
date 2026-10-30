@@ -140,6 +140,128 @@ RUN set -eux; \
     cat /usr/local/lib/php/runtime-deps.txt; \
     php -m
 
+# php-slim: the same compiled PHP (CLI and FPM, every extension) on plain Alpine, without bash,
+# git, curl, Composer, headers or the logging helpers. Built with --target slim; it sits before
+# the full image so that a plain build still produces rollogi/php. The digest is the one
+# alpine/base pins (Dependabot updates both Dockerfiles in one grouped PR).
+FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS slim
+
+ARG PHP_VERSION
+ARG PHP_PATCH_VERSION
+ARG APP_UID=1000
+ARG APP_GID=1000
+
+ENV LANG=C.UTF-8 \
+    TZ=UTC \
+    PHP_VERSION=${PHP_VERSION} \
+    PHP_PATCH_VERSION=${PHP_PATCH_VERSION} \
+    APP_UID=${APP_UID} \
+    APP_GID=${APP_GID} \
+    PHPRC=/run/php
+
+# PHP General Settings
+ENV PHP_MEMORY_LIMIT=128M
+ENV PHP_UPLOAD_MAX_FILESIZE=2M
+ENV PHP_POST_MAX_SIZE=2M
+ENV PHP_MAX_INPUT_TIME=60
+ENV PHP_MAX_EXECUTION_TIME=30
+ENV PHP_DISPLAY_ERRORS=Off
+ENV PHP_ERROR_REPORTING="E_ALL & ~E_DEPRECATED & ~E_STRICT"
+ENV PHP_DATE_TIMEZONE=UTC
+
+# OPcache Settings
+ENV OPCACHE_ENABLE=0
+ENV OPCACHE_ENABLE_CLI=0
+ENV OPCACHE_MEMORY_CONSUMPTION=128
+ENV OPCACHE_INTERNED_STRINGS_BUFFER=8
+ENV OPCACHE_MAX_ACCELERATED_FILES=10000
+ENV OPCACHE_VALIDATE_TIMESTAMPS=1
+ENV OPCACHE_REVALIDATE_FREQ=2
+ENV OPCACHE_MAX_WASTED_PERCENTAGE=5
+ENV OPCACHE_LOG_VERBOSITY_LEVEL=1
+ENV OPCACHE_ERROR_LOG=/var/log/php-opcache.log
+
+# PHP Security Settings (configurable, permissive defaults for base image)
+ENV PHP_EXPOSE_PHP=Off \
+    PHP_DISABLE_FUNCTIONS="" \
+    PHP_ALLOW_URL_FOPEN=On \
+    PHP_ALLOW_URL_INCLUDE=Off \
+    PHP_OPEN_BASEDIR="" \
+    PHP_SESSION_COOKIE_HTTPONLY=On \
+    PHP_SESSION_COOKIE_SECURE="" \
+    PHP_SESSION_COOKIE_SAMESITE=Lax \
+    PHP_SESSION_USE_STRICT_MODE=On \
+    PHP_CGI_FIX_PATHINFO=0 \
+    PHP_MAX_INPUT_VARS=1000 \
+    PHP_SENDMAIL_PATH=""
+
+# php-fpm, run with the "serve" command; listens on every interface for a web server in
+# another container, so keep port 9000 on a private network
+ENV PHP_FPM_LISTEN=0.0.0.0:9000 \
+    PHP_FPM_LISTEN_ALLOWED_CLIENTS="" \
+    PHP_FPM_MAX_CHILDREN=30 \
+    PHP_FPM_START_SERVERS=5 \
+    PHP_FPM_MIN_SPARE_SERVERS=3 \
+    PHP_FPM_MAX_SPARE_SERVERS=10 \
+    PHP_FPM_MAX_REQUESTS=1000 \
+    PHP_FPM_REQUEST_TERMINATE_TIMEOUT=0 \
+    PHP_FPM_ERROR_LOG=/proc/self/fd/2 \
+    PHP_FPM_SLOWLOG=/proc/self/fd/2 \
+    APP_INSTALL="" \
+    APP_INSTALL_DIR=""
+
+# Only PHP itself from the build stage: the two binaries, the shared extensions and the ini
+# files that load them, and the list of libraries they link against
+COPY --from=builder /usr/local/bin/php /usr/local/bin/php
+COPY --from=builder /usr/local/sbin/php-fpm /usr/local/sbin/php-fpm
+COPY --from=builder /usr/local/lib/php/extensions /usr/local/lib/php/extensions
+COPY --from=builder /usr/local/lib/php/runtime-deps.txt /usr/local/lib/php/runtime-deps.txt
+COPY --from=builder /usr/local/etc/php/conf.d /usr/local/etc/php/conf.d
+
+# Set by CI to a hash of the Alpine package indexes (alpine/apk-index-hash.sh) so this layer
+# is rebuilt whenever Alpine publishes new packages instead of being reused from the cache
+ARG APK_INDEX_HASH=""
+
+# The runtime libraries, tini as PID 1, and the Alpine release's security fixes. Nothing else:
+# busybox provides the shell the entrypoint needs.
+RUN set -eux; \
+    apk upgrade --no-cache; \
+    apk add --no-cache $(cat /usr/local/lib/php/runtime-deps.txt) tini; \
+    installed="$(php -r 'echo strtolower(PHP_VERSION);')"; \
+    expected="$(printf '%s' "${PHP_PATCH_VERSION}" | tr -d '_' | tr 'A-Z' 'a-z')"; \
+    if [ "${installed}" != "${expected}" ]; then \
+        echo "ERROR: built PHP ${PHP_PATCH_VERSION} but ${installed} is installed"; exit 1; \
+    fi; \
+    startup="$(php -r '' 2>&1)"; \
+    if [ -n "${startup}" ]; then \
+        echo "ERROR: PHP prints startup messages:"; echo "${startup}"; exit 1; \
+    fi; \
+    addgroup -g "${APP_GID}" -S appuser; \
+    adduser -u "${APP_UID}" -S appuser -G appuser; \
+    mkdir -p /app /run/php/php-fpm.d; \
+    chown appuser:appuser /app /run/php /run/php/php-fpm.d /var/log; \
+    chmod 1777 /run/php /run/php/php-fpm.d /var/log; \
+    find / -xdev -type f -perm /6000 -exec chmod a-s {} +
+
+LABEL org.opencontainers.image.title="rollogi/php-slim" \
+      org.opencontainers.image.description="PHP CLI and FPM compiled from the php.net source on plain Alpine 3.24, without bash, Composer or build tooling" \
+      org.opencontainers.image.version="${PHP_PATCH_VERSION}" \
+      org.opencontainers.image.source="https://github.com/AdamRollinson/docker" \
+      org.opencontainers.image.licenses="MIT"
+
+COPY php.ini.template www.conf.template /usr/local/etc/php/
+COPY slim/render.php /usr/local/lib/php-slim/render.php
+COPY slim/php-slim-entrypoint.sh slim/php-fpm-healthcheck /usr/local/bin/
+
+WORKDIR /app
+
+USER appuser
+
+ENTRYPOINT ["/sbin/tini", "--", "php-slim-entrypoint.sh"]
+
+# A CLI image by default; "serve" runs php-fpm instead
+CMD ["php", "-v"]
+
 FROM rollogi/base:latest
 
 # Switch to root for package installation

@@ -1,0 +1,58 @@
+#!/usr/local/bin/php -n
+<?php
+
+// Health check for php-fpm in php-slim: sends the pool's ping path over FastCGI and expects
+// "pong", like the php-fpm image's check but without cgi-fcgi. Follows PHP_FPM_LISTEN, so a
+// unix socket or another port is checked correctly. Use it with --health-cmd or a Kubernetes
+// exec probe when the container runs "serve". An explicit <host:port> or socket path argument
+// checks another php-fpm instead.
+
+declare(strict_types=1);
+
+if (isset($argv[1])) {
+    $target = str_starts_with($argv[1], '/') ? sprintf('unix://%s', $argv[1]) : sprintf('tcp://%s', $argv[1]);
+} else {
+    $listen = getenv('PHP_FPM_LISTEN') ?: '127.0.0.1:9000';
+    $target = str_starts_with($listen, '/')
+        ? sprintf('unix://%s', $listen)
+        : sprintf('tcp://127.0.0.1:%s', str_contains($listen, ':') ? substr((string) strrchr($listen, ':'), 1) : $listen);
+}
+
+$socket = @stream_socket_client($target, $errno, $error, 2.0);
+if ($socket === false) {
+    exit(1);
+}
+stream_set_timeout($socket, 2);
+
+$record = static fn (int $type, string $body): string => pack('CCnnCx', 1, $type, 1, strlen($body), 0) . $body;
+$params = '';
+foreach (['SCRIPT_NAME' => '/fpm-ping', 'SCRIPT_FILENAME' => '/fpm-ping', 'REQUEST_METHOD' => 'GET'] as $key => $value) {
+    $params .= chr(strlen($key)) . chr(strlen($value)) . $key . $value;
+}
+fwrite($socket, $record(1, pack('nCx5', 1, 0)) . $record(4, $params) . $record(4, '') . $record(5, ''));
+
+$read = static function ($socket, int $length): string {
+    $buffer = '';
+    while (strlen($buffer) < $length) {
+        $chunk = fread($socket, $length - strlen($buffer));
+        if ($chunk === false || $chunk === '') {
+            break;
+        }
+        $buffer .= $chunk;
+    }
+    return $buffer;
+};
+
+$stdout = '';
+while (strlen($header = $read($socket, 8)) === 8) {
+    $fields = unpack('Cversion/Ctype/nid/nlength/Cpadding', $header);
+    $body = $read($socket, $fields['length'] + $fields['padding']);
+    if ($fields['type'] === 6) {
+        $stdout .= substr($body, 0, $fields['length']);
+    }
+    if ($fields['type'] === 3) {
+        break;
+    }
+}
+
+exit(str_contains($stdout, 'pong') ? 0 : 1);

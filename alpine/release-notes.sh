@@ -13,7 +13,7 @@ registry="${DOCKER_REGISTRY:-rollogi}"
 repo_url="${REPO_URL:-https://github.com/AdamRollinson/docker}"
 
 rows=""
-for image in php php-nginx php-nginx-dev php-fpm php-dev; do
+for image in php php-nginx php-nginx-dev php-fpm php-dev php-slim; do
     ref="${registry}/${image}:${patch}"
     digest=$(docker buildx imagetools inspect "$ref" --format '{{.Manifest.Digest}}' 2>/dev/null) || { echo "ERROR: ${ref} is not published" >&2; exit 3; }
     rows="${rows}| \`${registry}/${image}\` | \`${tag}\`, \`${patch}\` | \`${digest}\` |
