@@ -1,35 +1,55 @@
 version: 2
 
-# Every version update across all ecosystems arrives as one weekly pull request against develop,
-# instead of one pull request per dependency against main. Dependabot reads this file from the
-# default branch (main), so it lives there even though the pull requests target develop.
-# Security updates are not grouped this way: Dependabot always opens them against main.
-multi-ecosystem-groups:
-  dependencies:
-    schedule:
-      interval: weekly
-    # target-branch belongs here: Dependabot rejects it on updates that are part of the group
-    target-branch: develop
-    labels:
-      - dependencies
-
+# Minor and patch updates arrive grouped, one weekly pull request per ecosystem against develop.
+# Every major update gets a pull request of its own, so a breaking upgrade can be reviewed, fixed
+# or closed without holding back the rest (updates that match no group rule are opened
+# individually). Dependabot reads this file from the default branch (main), so it lives there
+# even though the pull requests target develop. Security updates ignore target-branch and always
+# open against main.
 updates:
   - package-ecosystem: github-actions
     directory: /
-    patterns: ["*"]
-    multi-ecosystem-group: dependencies
+    schedule:
+      interval: weekly
+    target-branch: develop
+    labels:
+      - dependencies
+    groups:
+      github-actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
 
   # Keeps the digest-pinned alpine image current. alpine/base and the php-slim stage in
-  # alpine/php pin the same digest, so both move together in the grouped weekly PR.
+  # alpine/php pin the same digest, so they move together in one pull request. This group is not
+  # limited by update type: a digest-only update has no version change to classify, and an
+  # Alpine release (3.24 to 3.25) is a minor update anyway.
   - package-ecosystem: docker
     directories:
       - /alpine/base
       - /alpine/php
-    patterns: ["*"]
-    multi-ecosystem-group: dependencies
+    schedule:
+      interval: weekly
+    target-branch: develop
+    labels:
+      - dependencies
+    groups:
+      alpine:
+        patterns: ["*"]
 
   # Documentation site dependencies
   - package-ecosystem: npm
     directory: /docs
-    patterns: ["*"]
-    multi-ecosystem-group: dependencies
+    schedule:
+      interval: weekly
+    target-branch: develop
+    labels:
+      - dependencies
+    groups:
+      docs:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      # TypeScript 7 (the native compiler) is not supported by typescript-eslint, so lint fails.
+      # Remove once it is: https://github.com/typescript-eslint/typescript-eslint/issues/10940
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
